@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Smart Weather Clock</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="UTF-8">
+<style>
+  :root{--bg:#111;--fg:#eee;--accent:#34c759;--card:#1c1c1e}
+  body{font-family:system-ui,Arial,sans-serif;background:var(--bg);color:var(--fg);margin:0;padding:16px;max-width:520px;margin:auto}
+  h1{font-size:20px}h2{font-size:16px;margin-top:24px}
+  .card{background:var(--card);border-radius:12px;padding:14px;margin:10px 0}
+  label{display:block;margin:8px 0 4px;font-size:14px;color:#aaa}
+  input,select{width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #333;background:#000;color:#fff;font-size:15px}
+  button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:10px 14px;font-size:15px;margin-top:10px;cursor:pointer}
+  .row{display:flex;gap:10px}.row>*{flex:1}
+</style>
+</head>
+<body>
+<h1>Smart Weather Clock</h1>
+
+<div class="card">
+  <h2>WiFi</h2>
+  <label>Network</label>
+  <select id="ssid"></select>
+  <button onclick="scan()">Refresh</button>
+  <label>Password</label>
+  <input id="pass" type="password" placeholder="WiFi password">
+  <button onclick="connect()">Connect &amp; Reboot</button>
+</div>
+
+<div class="card">
+  <h2>Display</h2>
+  <label>Theme</label>
+  <select id="theme" onchange="setv('theme',this.value)">
+    <option value="0">Classic</option><option value="1">Weather</option>
+    <option value="2">Photo</option><option value="3">Dial</option>
+    <option value="4">Simple</option><option value="5">Forecast</option>
+    <option value="6">Flip Clock</option>
+  </select>
+  <label>Brightness</label>
+  <input id="bright" type="range" min="0" max="100" onchange="setv('brightness',this.value)">
+  <label>City</label>
+  <input id="city" placeholder="Sydney" onchange="setv('city',this.value)">
+  <label>OpenWeatherMap Key</label>
+  <input id="wkey" placeholder="API key" onchange="setv('weatherkey',this.value)">
+</div>
+
+<p style="color:#666;font-size:12px">Open-source firmware · settings save on change</p>
+<script>
+async function scan(){
+  const r=await fetch('/scanwifi'); const list=await r.json();
+  const s=document.getElementById('ssid'); s.innerHTML='';
+  list.forEach(n=>{const o=document.createElement('option');o.value=o.text=n;s.add(o)});
+}
+async function connect(){
+  const ssid=document.getElementById('ssid').value, pass=document.getElementById('pass').value;
+  await fetch('/connect?ssid='+encodeURIComponent(ssid)+'&password='+encodeURIComponent(pass));
+}
+async function setv(k,v){ await fetch('/api/set?key='+k+'&value='+encodeURIComponent(v)); }
+async function load(){
+  try{const c=await (await fetch('/config')).json();
+    document.getElementById('theme').value=c.theme;
+    document.getElementById('bright').value=c.brightness;
+    document.getElementById('city').value=c.city||'';
+  }catch(e){}
+  scan();
+}
+load();
+</script>
+</body>
+</html>

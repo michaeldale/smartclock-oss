@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Smart Clock</title>
+<style>
+:root{
+  --bg:#f4f5f7;--surface:#fff;--surface2:#f0f1f4;--text:#16181d;--muted:#667085;
+  --line:#e3e5ea;--accent:#2563eb;--accent-soft:#e8efff;--ok:#16a34a;--warn:#d97706;
+  --bad:#dc2626;--shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08);
+  --r:14px;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0e1013;--surface:#171a1f;--surface2:#1f232a;--text:#e9ebef;--muted:#98a1b0;
+  --line:#2a2f37;--accent:#5b8cff;--accent-soft:#1d2a47;--ok:#22c55e;--warn:#f59e0b;
+  --bad:#f87171;--shadow:none;
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 85%,transparent);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.bar{max-width:1080px;margin:auto;padding:12px 16px;display:flex;align-items:center;gap:12px}
+.logo{width:34px;height:34px;border-radius:10px;background:var(--accent);display:grid;place-items:center;color:#fff;flex:none}
+.bar h1{font-size:16px;margin:0;line-height:1.2}
+.bar small{color:var(--muted);font-size:12px}
+.pill{margin-left:auto;display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:99px;
+  font-size:12px;font-weight:600;background:var(--surface2);color:var(--muted);white-space:nowrap}
+.pill i{width:8px;height:8px;border-radius:50%;background:currentColor}
+.pill.ok{color:var(--ok)}.pill.warn{color:var(--warn)}.pill.bad{color:var(--bad)}
+main{max-width:1080px;margin:auto;padding:16px;display:grid;gap:16px;grid-template-columns:1fr}
+@media (min-width:860px){main{grid-template-columns:1fr 1fr}.wide{grid-column:1/-1}}
+.banner{grid-column:1/-1;padding:12px 14px;border-radius:var(--r);background:color-mix(in srgb,var(--warn) 14%,var(--surface));
+  border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);font-size:14px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:18px;min-width:0}
+.card h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 14px;display:flex;align-items:center;gap:8px}
+.card h2 svg{width:16px;height:16px}
+.locked{opacity:.45;pointer-events:none}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.tile{background:var(--surface2);border-radius:12px;padding:14px;min-width:0}
+.tile .k{font-size:12px;color:var(--muted)}
+.tile .v{font-size:20px;font-weight:650;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile .s{font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.time .v{font-size:30px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+.row:first-of-type{border-top:0;padding-top:0}
+.row>label,.row>.lbl{font-weight:550}
+.row .hint{display:block;font-weight:400;font-size:12.5px;color:var(--muted)}
+.field{display:grid;gap:6px;margin-top:12px}
+.field>label{font-size:13px;font-weight:550}
+input[type=text],input[type=password],input[type=search],select{width:100%;font:inherit;color:var(--text);background:var(--surface);
+  border:1px solid var(--line);border-radius:10px;padding:9px 11px;outline:none;transition:border-color .15s,box-shadow .15s}
+input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+select.sm{width:auto;min-width:84px}
+.range{display:flex;align-items:center;gap:12px;flex:1;max-width:320px}
+input[type=range]{flex:1;accent-color:var(--accent)}
+.range output{min-width:42px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted);font-size:13px}
+.seg{display:inline-flex;background:var(--surface2);border-radius:10px;padding:3px;gap:2px}
+.seg button{border:0;background:none;color:var(--muted);font:inherit;font-size:13.5px;font-weight:600;padding:6px 12px;border-radius:8px;cursor:pointer}
+.seg button.on{background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
+.themes{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+.theme{border:1.5px solid var(--line);background:var(--surface);color:var(--text);border-radius:12px;padding:10px 8px;font:inherit;font-size:13px;
+  font-weight:600;cursor:pointer;display:grid;gap:6px;justify-items:center}
+.theme svg{width:38px;height:38px;color:var(--muted)}
+.theme.on{border-color:var(--accent);background:var(--accent-soft)}
+.theme.on svg{color:var(--accent)}
+.theme[disabled]{opacity:.45;cursor:not-allowed}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{border:1px solid var(--line);background:var(--surface);color:var(--muted);font:inherit;font-size:12.5px;font-weight:600;padding:5px 10px;border-radius:99px;cursor:pointer}
+.chip.on{background:var(--accent-soft);border-color:var(--accent);color:var(--text)}
+.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;margin-top:12px}
+.ph{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--surface2)}
+.ph img{width:100%;height:100%;object-fit:cover;display:block}
+.ph button{position:absolute;top:4px;right:4px;width:24px;height:24px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:14px;line-height:24px;cursor:pointer;padding:0}
+.ph .tag{position:absolute;left:4px;bottom:4px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:6px}
+.ph.busy{display:grid;place-items:center;color:var(--muted);font-size:12px}
+.meter{height:6px;border-radius:99px;background:var(--surface2);overflow:hidden;margin-top:10px}
+.meter i{display:block;height:100%;background:var(--accent)}
+.switch{position:relative;width:44px;height:26px;flex:none}
+.switch input{opacity:0;width:0;height:0}
+.switch span{position:absolute;inset:0;border-radius:99px;background:var(--line);transition:.2s;cursor:pointer}
+.switch span:after{content:"";position:absolute;width:20px;height:20px;left:3px;top:3px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.switch input:checked+span{background:var(--accent)}
+.switch input:checked+span:after{transform:translateX(18px)}
+.colors{display:flex;gap:14px;flex-wrap:wrap}
+.colors label{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:550;cursor:pointer}
+input[type=color]{width:34px;height:34px;padding:0;border:1px solid var(--line);border-radius:9px;background:none;cursor:pointer}
+input[type=color]::-webkit-color-swatch-wrapper{padding:3px}input[type=color]::-webkit-color-swatch{border:0;border-radius:6px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-weight:600;font-size:14px;border-radius:10px;padding:9px 14px;
+  border:1px solid var(--line);background:var(--surface);color:var(--text);cursor:pointer;transition:filter .15s}
+.btn:hover{filter:brightness(.97)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.danger{color:var(--bad)}
+.btn[disabled]{opacity:.5;cursor:default}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.nets{list-style:none;margin:10px 0 0;padding:0;border:1px solid var(--line);border-radius:12px;max-height:260px;overflow:auto}
+.nets li{display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line);cursor:pointer}
+.nets li:first-child{border-top:0}
+.nets li:hover{background:var(--surface2)}
+.nets li.on{background:var(--accent-soft)}
+.nets .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nets .empty{color:var(--muted);cursor:default}
+.sig{display:inline-flex;align-items:flex-end;gap:2px;height:14px}
+.sig b{width:3px;background:var(--line);border-radius:1px}
+.sig b.on{background:var(--text)}
+.lock{width:14px;height:14px;color:var(--muted)}
+.pw{position:relative}
+.pw button{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--muted);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;padding:4px 6px}
+.drop{border:1.5px dashed var(--line);border-radius:12px;padding:22px;text-align:center;color:var(--muted);cursor:pointer;transition:.15s}
+.drop.over,.drop:hover{border-color:var(--accent);background:var(--accent-soft);color:var(--text)}
+.drop strong{color:var(--text)}
+.progress{height:8px;border-radius:99px;background:var(--surface2);overflow:hidden;margin-top:12px;display:none}
+.progress i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.note{font-size:13px;color:var(--muted);margin-top:10px}
+.msg{font-size:13.5px;margin-top:10px;min-height:1em}
+.msg.bad{color:var(--bad)}.msg.ok{color:var(--ok)}
+dl{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin:0;font-size:14px}
+dt{color:var(--muted)}dd{margin:0;overflow:hidden;text-overflow:ellipsis}
+a{color:var(--accent)}
+#toast{position:fixed;left:50%;bottom:20px;transform:translate(-50%,20px);opacity:0;background:var(--text);color:var(--bg);
+  padding:9px 16px;border-radius:99px;font-size:14px;font-weight:600;transition:.25s;pointer-events:none;z-index:9}
+#toast.show{opacity:1;transform:translate(-50%,0)}#toast.bad{background:var(--bad);color:#fff}
+#overlay{position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 80%,transparent);backdrop-filter:blur(4px);display:none;place-items:center;z-index:10}
+#overlay div{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:24px 28px;text-align:center;box-shadow:var(--shadow);max-width:340px}
+.spin{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:s 1s linear infinite;margin:0 auto 12px}
+@keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<header><div class="bar">
+  <div class="logo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+  <div><h1>Smart Clock</h1><small id="ver">&nbsp;</small></div>
+  <span class="pill" id="pill"><i></i><span>Connecting…</span></span>
+</div></header>
+
+<main>
+  <div class="banner" id="recovery" hidden><strong>Recovery mode.</strong> Settings are read-only. You can still update the firmware;
+    <a href="#" onclick="restart();return false">restart</a> to leave recovery.</div>
+
+  <section class="card wide">
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>Overview</h2>
+    <div class="tiles">
+      <div class="tile time"><div class="k">Device time</div><div class="v" id="tTime">--:--</div><div class="s" id="tDate">Waiting for NTP</div></div>
+      <div class="tile"><div class="k">Network</div><div class="v" id="tNet">—</div><div class="s" id="tNetS">&nbsp;</div></div>
+      <div class="tile"><div class="k">Weather</div><div class="v" id="tWx">—</div><div class="s" id="tWxS">&nbsp;</div></div>
+      <div class="tile"><div class="k">Device</div><div class="v" id="tUp">—</div><div class="s" id="tDev">&nbsp;</div></div>
+    </div>
+  </section>
+
+  <section class="card settings">
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>Display</h2>
+    <div class="themes" id="themes"></div>
+    <div class="row" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+      <span class="lbl">Rotate faces<span class="hint">Cycle through faces automatically</span></span>
+      <select class="sm" id="themeInterval" data-key="themeInterval">
+        <option value="0">Off</option><option value="10">10 s</option><option value="30">30 s</option>
+        <option value="60">1 min</option><option value="300">5 min</option></select>
+    </div>
+    <div id="rotBox"><span style="font-size:12.5px;color:var(--muted)">Include in rotation (faces without weather or photos are skipped)</span>
+      <div class="chips" id="rotChips"></div></div>
+    <div class="row"><span class="lbl">Brightness</span>
+      <div class="range"><input type="range" min="0" max="100" id="brightness" data-key="brightness" data-live><output></output></div></div>
+    <div class="row"><span class="lbl">Colours</span>
+      <div class="colors">
+        <label><input type="color" id="color1" data-key="color1" data-rgb565>Time &amp; hands</label>
+        <label><input type="color" id="color2" data-key="color2" data-rgb565>Date &amp; highlights</label>
+        <label><input type="color" id="color3" data-key="color3" data-rgb565>Weather</label>
+      </div></div>
+  </section>
+
+  <section class="card settings">
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z"/></svg>Night mode</h2>
+    <div class="row"><label for="nightmode">Dim at night<span class="hint">Lower the backlight between these hours</span></label>
+      <label class="switch"><input type="checkbox" id="nightmode" data-key="nightmode"><span></span></label></div>
+    <div class="row"><span class="lbl">From</span><select class="sm hours" id="starttime" data-key="starttime"></select></div>
+    <div class="row"><span class="lbl">Until</span><select class="sm hours" id="stoptime" data-key="stoptime"></select></div>
+    <div class="row"><span class="lbl">Night brightness</span>
+      <div class="range"><input type="range" min="0" max="100" id="nightbrightness" data-key="nightbrightness"><output></output></div></div>
+  </section>
+
+  <section class="card settings">
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>Time &amp; region</h2>
+    <div class="field" style="margin-top:0"><label for="tz">Timezone</label>
+      <select id="tz" data-key="tz">
+        <option value="AEST-10AEDT,M10.1.0,M4.1.0/3">Sydney · Melbourne · Canberra · Hobart</option>
+        <option value="AEST-10">Brisbane</option>
+        <option value="ACST-9:30ACDT,M10.1.0,M4.1.0/3">Adelaide</option>
+        <option value="ACST-9:30">Darwin</option>
+        <option value="AWST-8">Perth</option>
+        <option value="NZST-12NZDT,M9.5.0,M4.1.0/3">Auckland</option>
+        <option value="JST-9">Tokyo</option>
+        <option value="SGT-8">Singapore</option>
+        <option value="GMT0BST,M3.5.0/1,M10.5.0">London</option>
+        <option value="CET-1CEST,M3.5.0,M10.5.0/3">Paris · Berlin</option>
+        <option value="EST5EDT,M3.2.0,M11.1.0">New York</option>
+        <option value="PST8PDT,M3.2.0,M11.1.0">Los Angeles</option>
+        <option value="UTC0">UTC</option>
+        <option value="custom">Custom POSIX rule…</option>
+      </select></div>
+    <div class="field" id="tzCustomBox" hidden><label for="tzCustom">POSIX TZ rule</label>
+      <input type="text" id="tzCustom" placeholder="e.g. AEST-10AEDT,M10.1.0,M4.1.0/3" spellcheck="false"></div>
+    <div class="row" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px"><span class="lbl">Clock format</span>
+      <div class="seg" data-key="hour12"><button data-v="1">12 h</button><button data-v="0">24 h</button></div></div>
+    <div class="row"><span class="lbl">Temperature</span>
+      <div class="seg" data-key="celsius"><button data-v="1">°C</button><button data-v="0">°F</button></div></div>
+    <div class="row"><span class="lbl">Wind speed</span>
+      <div class="seg" data-key="mile"><button data-v="0">km/h</button><button data-v="1">mph</button></div></div>
+    <div class="field"><label for="ntp">Time server</label><input type="text" id="ntp" data-key="ntp" spellcheck="false"></div>
+  </section>
+
+  <section class="card settings">
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 18a5 5 0 1 1 1-9.9A6 6 0 0 1 19 10a4 4 0 0 1-1 8z"/></svg>Weather</h2>
+    <div class="field" style="margin-top:0"><label for="city">City</label><input type="text" id="city" data-key="city" placeholder="Sydney, AU">
+      <span class="hint" id="wxLoc" style="font-size:12.5px;color:var(--muted)">A city name, optionally with a country code: “Sydney, AU”.</span></div>
+    <div class="row" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
+      <span class="lbl">Last update<span class="hint" id="wxAge">—</span></span>
+      <button class="btn" id="wxSyncBtn" onclick="syncWeather()">Sync now</button></div>
+    <p class="note">Weather from <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>, no key needed. Current conditions and the 4-day forecast update every 15 minutes.</p>
+  </section>
+
+  <section class="card settings">
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r=".8" fill="currentColor"/></svg>WiFi</h2>
+    <div class="row"><span class="lbl">Current<span class="hint" id="wifiNow">—</span></span>
+      <button class="btn" id="scanBtn" onclick="scan()">Scan</button></div>
+    <ul class="nets" id="nets"><li class="empty">Press Scan to list nearby networks</li></ul>
+    <div class="field"><label for="ssid">Network name</label><input type="text" id="ssid" spellcheck="false"></div>
+    <div class="field"><label for="pass">Password</label>
+      <div class="pw"><input type="password" id="pass" autocomplete="off"><button type="button" onclick="reveal('pass',this)">Show</button></div></div>
+    <div class="btns"><button class="btn primary" onclick="connect()">Connect &amp; restart</button></div>
+    <p class="note">2.4 GHz networks only. The setup network <strong>Smart Weather Clock</strong> stays on as a fallback.</p>
+  </section>
+
+  <section class="card settings">
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M3 18l6-5 4 3 3-2 5 4"/></svg>Photos</h2>
+    <div class="drop" id="phDrop"><strong>Add photos</strong><br><span>or drop them here · cropped to 240 × 240 on this device before upload</span></div>
+    <input type="file" id="phFile" accept="image/*" multiple hidden>
+    <div class="photos" id="phList"></div>
+    <div class="meter"><i id="phMeter" style="width:0"></i></div>
+    <p class="note" id="phNote">The Photo face shows a new photo every minute.</p>
+  </section>
+
+  <section class="card">
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Firmware update</h2>
+    <div class="drop" id="drop"><strong>Choose a firmware .bin</strong><br><span id="fwName">or drop it here</span></div>
+    <input type="file" id="fw" accept=".bin" hidden>
+    <div class="progress" id="prog"><i></i></div>
+    <div class="msg" id="fwMsg"></div>
+    <div class="btns"><button class="btn primary" id="fwBtn" onclick="ota()" disabled>Install update</button></div>
+    <p class="note">Only SmartClock firmware images are accepted; the image is checked before anything is written. Keep the clock powered until it restarts.</p>
+  </section>
+
+  <section class="card">
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z"/></svg>System</h2>
+    <dl>
+      <dt>Firmware</dt><dd id="sVer">—</dd>
+      <dt>LAN address</dt><dd id="sIp">—</dd>
+      <dt>Hostname</dt><dd id="sHost">—</dd>
+      <dt>Setup network</dt><dd id="sAp">Smart Weather Clock</dd>
+      <dt>Storage</dt><dd id="sFs">—</dd>
+      <dt>Free memory</dt><dd id="sHeap">—</dd>
+      <dt>Last reset</dt><dd id="sReset">—</dd>
+    </dl>
+    <div class="btns"><button class="btn" onclick="restart()">Restart</button>
+      <button class="btn danger" id="fmtBtn" onclick="formatFs()" hidden>Format storage</button></div>
+    <p class="note" id="fmtNote" hidden>Storage could not be mounted. Formatting erases the whole storage area, including any photos and settings from the original firmware.</p>
+  </section>
+</main>
+
+<div id="toast"></div>
+<div id="overlay"><div><div class="spin"></div><strong id="ovT">Restarting</strong><div class="note" id="ovS">The page will reconnect automatically.</div></div></div>
+
+<script>
+const $=id=>document.getElementById(id),all=s=>[...document.querySelectorAll(s)];
+let cfg={},st={},recovery=false,fwFile=null;
+
+const THEMES=[[0,'Classic','<rect x="4" y="8" width="30" height="16" rx="3"/><path d="M10 14v4M14 14v4M19 13v1M19 18v1M24 14v4M28 14v4M10 28h18"/>'],
+ [3,'Dial','<circle cx="19" cy="19" r="14"/><path d="M19 10v9l6 4"/>'],
+ [1,'Weather','<path d="M12 27a6 6 0 1 1 1.4-11.8A8 8 0 0 1 29 17a5 5 0 0 1-1 10z"/>'],
+ [5,'Forecast','<rect x="5" y="9" width="28" height="20" rx="3"/><path d="M5 16h28M14 9v20M24 9v20"/>'],
+ [6,'Flip','<rect x="6" y="8" width="11" height="22" rx="2"/><rect x="21" y="8" width="11" height="22" rx="2"/><path d="M6 19h11M21 19h11"/>'],
+ [4,'Simple','<path d="M9 19h20"/>'],[2,'Photo','<rect x="6" y="8" width="26" height="22" rx="3"/><circle cx="14" cy="16" r="3"/><path d="M6 27l8-7 6 5 4-3 8 6"/>']];
+
+function toast(m,bad){const t=$('toast');t.textContent=m;t.className='show'+(bad?' bad':'');clearTimeout(toast.h);toast.h=setTimeout(()=>t.className='',2200)}
+async function req(path,opt){const r=await fetch(path,opt);const t=await r.text();if(!r.ok)throw new Error(t||('HTTP '+r.status));return t}
+const form=o=>({method:'POST',body:new URLSearchParams(o)});
+async function set(key,value){
+  if(recovery){toast('Read-only in recovery',1);return false}
+  try{const t=await req('/api/set',form({key,value}));if(t!=='OK')throw new Error(t);toast('Saved');cfg[key]=value;return true}
+  catch(e){toast(e.message||'Save failed',1);return false}}
+
+// RGB565 <-> #rrggbb
+const hex565=v=>{const r=(v>>11)&31,g=(v>>5)&63,b=v&31,h=x=>x.toString(16).padStart(2,'0');
+  return '#'+h(Math.round(r*255/31))+h(Math.round(g*255/63))+h(Math.round(b*255/31))};
+const to565=h=>{const n=parseInt(h.slice(1),16);return((n>>19&31)<<11)|((n>>10&63)<<5)|(n>>3&31)};
+
+function bindInputs(){
+  all('[data-key]').forEach(el=>{
+    const key=el.dataset.key;
+    if(el.classList.contains('seg')){
+      el.querySelectorAll('button').forEach(b=>b.onclick=async()=>{if(await set(key,b.dataset.v)){paintSeg(el,b.dataset.v);if(key==='city')setTimeout(poll,300)}});return}
+    if(el.id==='tz'){el.onchange=()=>{const c=el.value==='custom';$('tzCustomBox').hidden=!c;if(!c)set('tz',el.value);else $('tzCustom').focus()};return}
+    if(el.type==='range'){const out=el.nextElementSibling,show=()=>out.textContent=el.value+'%';
+      el.addEventListener('input',()=>{show();if(el.dataset.live){clearTimeout(el.h);el.h=setTimeout(()=>set(key,el.value),250)}});
+      el.addEventListener('change',()=>{clearTimeout(el.h);set(key,el.value)});el.show=show;return}
+    el.onchange=async()=>{await set(key,el.type==='checkbox'?(el.checked?1:0):el.dataset.rgb565!==undefined?to565(el.value):el.value);
+      if(key==='city')setTimeout(poll,4000)};
+  });
+  $('tzCustom').onchange=e=>{const v=e.target.value.trim();if(v)set('tz',v)};
+  $('themeInterval').addEventListener('change',()=>{cfg.themeInterval=$('themeInterval').value;$('rotBox').hidden=!(+cfg.themeInterval>0)});
+}
+function paintSeg(el,v){el.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v===String(v)))}
+
+function renderThemes(){
+  $('themes').innerHTML=THEMES.map(([id,name,svg])=>
+    `<button class="theme${cfg.theme==id?' on':''}" data-id="${id}"><svg viewBox="0 0 38 38" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svg}</svg>${name}</button>`).join('');
+  all('.theme').forEach(b=>b.onclick=async()=>{if(await set('theme',b.dataset.id)){cfg.theme=+b.dataset.id;renderThemes()}});
+  const mask=cfg.faces===undefined?127:+cfg.faces;
+  $('rotChips').innerHTML=THEMES.map(([id,name])=>`<button class="chip${mask>>id&1?' on':''}" data-id="${id}">${name}</button>`).join('');
+  all('#rotChips .chip').forEach(b=>b.onclick=async()=>{const m=(cfg.faces===undefined?127:+cfg.faces)^(1<<b.dataset.id);
+    if(!m){toast('Keep at least one face',1);return}if(await set('faces',m)){cfg.faces=m;renderThemes()}});
+  $('rotBox').hidden=!(+cfg.themeInterval>0);
+}
+
+function fillConfig(c){
+  cfg=c;renderThemes();
+  for(const k of ['themeInterval','brightness','nightbrightness','starttime','stoptime','ntp','city']){const el=$(k);if(el&&c[k]!==undefined){el.value=c[k];el.show&&el.show()}}
+  if(![...$('themeInterval').options].some(o=>o.value==String(c.themeInterval))){const o=new Option(c.themeInterval+' s',c.themeInterval);$('themeInterval').add(o);$('themeInterval').value=c.themeInterval}
+  $('nightmode').checked=!!c.nightmode;
+  ['color1','color2','color3'].forEach(k=>$(k).value=hex565(c[k]||0));
+  paintSeg(document.querySelector('[data-key=hour12]'),c.hour12?1:0);
+  paintSeg(document.querySelector('[data-key=celsius]'),c.celsius?1:0);
+  paintSeg(document.querySelector('[data-key=mile]'),c.mile?1:0);
+  const z=$('tz');
+  if(!c.tz){const o=new Option('Fixed offset '+(c.timezone>=0?'+':'')+(c.timezone/60)+' h (no daylight saving)','');z.add(o,0);z.value=''}
+  else if([...z.options].some(o=>o.value===c.tz))z.value=c.tz;
+  else{z.value='custom';$('tzCustomBox').hidden=false;$('tzCustom').value=c.tz}
+}
+
+const bars=r=>{const n=r>-55?4:r>-65?3:r>-75?2:1;return '<span class="sig">'+[5,8,11,14].map((h,i)=>`<b style="height:${h}px" class="${i<n?'on':''}"></b>`).join('')+'</span>'};
+const up=s=>{const d=Math.floor(s/86400),h=Math.floor(s/3600)%24,m=Math.floor(s/60)%60;return d?`${d}d ${h}h`:h?`${h}h ${m}m`:`${m}m`};
+
+function fillStatus(s){
+  st=s;recovery=!!s.recovery;
+  $('recovery').hidden=!recovery;all('.settings').forEach(c=>c.classList.toggle('locked',recovery));
+  $('ver').textContent='Firmware '+s.version;$('sVer').textContent=s.version;
+  const pill=$('pill');
+  pill.className='pill '+(recovery?'bad':s.connected?'ok':'warn');
+  pill.lastElementChild.textContent=recovery?'Recovery':s.connected?'Online':'Setup network only';
+  if(s.time){const [d,t,z]=s.time.split(' ');$('tTime').textContent=t.slice(0,5);
+    const dt=new Date(d+'T00:00:00');$('tDate').textContent=dt.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'})+' · '+z}
+  $('tNet').textContent=s.connected?s.ssid:'Not connected';
+  $('tNetS').innerHTML=s.connected?s.ip+' &nbsp;'+bars(s.rssi):(s.ssid?'Trying '+s.ssid:'Use the WiFi card below');
+  $('wifiNow').innerHTML=s.connected?`${s.ssid} · ${s.ip} · ${s.rssi} dBm`:'Not connected';
+  const f=['false','0'].includes(String(cfg.celsius));
+  if(s.weather){$('tWx').textContent=Math.round(f?s.weather.temp*9/5+32:s.weather.temp)+'°'+(f?'F':'C')+' '+s.weather.main;
+    $('tWxS').textContent=(s.weather.city||'')+' · '+s.weather.desc+' · '+s.weather.humidity+'%'}
+  else{$('tWx').textContent=s.weatherError?'Unavailable':'Waiting…';
+    $('tWxS').textContent=s.weatherError||'First update on its way'}
+  const ago=s.weatherAge;
+  $('wxAge').textContent=ago===undefined?(s.weatherError?'Not yet: '+s.weatherError:'Not yet'):ago<60?'Just now':ago<3600?Math.floor(ago/60)+' min ago':Math.floor(ago/3600)+' h ago';
+  $('wxLoc').textContent=s.weatherError&&!s.weather?'⚠ '+s.weatherError:s.location?'Found: '+s.location:'A city name, optionally with a country code: “Sydney, AU”.';
+  $('tUp').textContent='Up '+up(s.uptime);$('tDev').textContent=(s.heap/1024).toFixed(1)+' KB free';
+  $('sIp').textContent=s.ip||'—';$('sHost').innerHTML=`<a href="http://${s.mdns}/">${s.mdns}</a>`;$('sAp').textContent='Smart Weather Clock · '+s.apIp;
+  $('sFs').textContent=s.storageReady?'Mounted':s.storageMountFailed?'Could not mount':'Not started';
+  const kb=b=>(b/1024).toFixed(1)+' KB';
+  $('sHeap').textContent=kb(s.heap)+(s.heapLow?' · lowest '+kb(s.heapLow):'');
+  $('sReset').textContent=s.resetReason||'—';
+  $('fmtBtn').hidden=$('fmtNote').hidden=!s.storageMountFailed;
+}
+async function poll(){try{fillStatus(await(await fetch('/status')).json())}catch(e){const p=$('pill');p.className='pill bad';p.lastElementChild.textContent='Offline'}}
+
+async function scan(){
+  const b=$('scanBtn');b.disabled=true;b.textContent='Scanning…';
+  try{const list=await(await fetch('/scanwifi?detail=1')).json(),seen=new Map();
+    list.forEach(n=>{if(n.ssid&&(!seen.has(n.ssid)||seen.get(n.ssid).rssi<n.rssi))seen.set(n.ssid,n)});
+    const nets=[...seen.values()].sort((a,b)=>b.rssi-a.rssi);
+    $('nets').innerHTML=nets.length?nets.map(n=>`<li data-ssid="${encodeURIComponent(n.ssid)}">${bars(n.rssi)}<span class="name"></span>${n.secure?'<svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>':''}</li>`).join(''):'<li class="empty">No networks found</li>';
+    all('#nets li[data-ssid]').forEach(li=>{const n=decodeURIComponent(li.dataset.ssid);li.querySelector('.name').textContent=n;
+      li.onclick=()=>{all('#nets li').forEach(x=>x.classList.remove('on'));li.classList.add('on');$('ssid').value=n;$('pass').focus()}});
+  }catch(e){toast('Scan failed',1)}
+  b.disabled=false;b.textContent='Scan'}
+
+async function syncWeather(){
+  const b=$('wxSyncBtn');b.disabled=true;b.textContent='Syncing…';
+  try{await req('/api/weather/sync',{method:'POST'});toast('Weather updated')}catch(e){toast(e.message||'Sync failed',1)}
+  await poll();b.disabled=false;b.textContent='Sync now'}
+
+function reveal(id,b){const i=$(id),h=i.type==='password';i.type=h?'text':'password';b.textContent=h?'Hide':'Show'}
+
+
+function waitForReboot(title,sub){
+  $('ovT').textContent=title;$('ovS').textContent=sub||'The page will reconnect automatically.';$('overlay').style.display='grid';
+  let n=0;const t0=Date.now();
+  const tick=async()=>{n++;if(Date.now()-t0>4000)try{const r=await fetch('/version',{cache:'no-store'});if(r.ok){location.reload();return}}catch(e){}
+    if(n>90){$('ovS').textContent='Still not back. If the network changed, find the clock at '+(st.mdns||'its .local name')+', in your router\'s client list, or on the setup network.';}
+    setTimeout(tick,1500)};
+  setTimeout(tick,1500)}
+
+async function connect(){
+  const ssid=$('ssid').value.trim(),password=$('pass').value;
+  if(!ssid){toast('Choose a network',1);return}
+  if(!confirm(`Connect to “${ssid}” and restart the clock?`))return;
+  try{await req('/connect',form({ssid,password}));waitForReboot('Connecting to '+ssid,'If the network is different, reconnect this device to it, then open '+(st.mdns||'its .local name')+'.')}
+  catch(e){toast(e.message||'Could not save WiFi',1)}}
+
+async function restart(){if(!confirm('Restart the clock?'))return;try{await fetch('/restart',{method:'POST'})}catch(e){}waitForReboot('Restarting')}
+
+async function formatFs(){if(!confirm('Erase the clock storage area? This cannot be undone.'))return;
+  try{await req('/format_storage?confirm=erase',{method:'POST'});waitForReboot('Formatting storage')}catch(e){toast(e.message,1)}}
+
+function pickFw(f){fwFile=f;$('fwName').textContent=f?`${f.name} · ${(f.size/1024).toFixed(0)} KB`:'or drop it here';$('fwBtn').disabled=!f;$('fwMsg').textContent=''}
+function ota(){
+  if(!fwFile)return;
+  const m=$('fwMsg'),p=$('prog'),bar=p.firstElementChild,btn=$('fwBtn');
+  m.className='msg';m.textContent='Uploading…';p.style.display='block';bar.style.width='0';btn.disabled=true;
+  const fd=new FormData();fd.append('update',fwFile,fwFile.name);
+  const x=new XMLHttpRequest();x.open('POST','/update_ota');
+  x.upload.onprogress=e=>{if(e.lengthComputable){const v=Math.round(e.loaded/e.total*100);bar.style.width=v+'%';m.textContent=v<100?`Uploading… ${v}%`:'Verifying…'}};
+  x.onload=()=>{if(x.status===200&&x.responseText==='OK'){m.className='msg ok';m.textContent='Verified. Installing…';waitForReboot('Installing update','Keep the clock powered. This takes about 30 seconds.')}
+    else{m.className='msg bad';m.textContent=x.responseText||'Update rejected';btn.disabled=false}};
+  x.onerror=()=>{m.className='msg bad';m.textContent='Upload failed';btn.disabled=false};
+  x.send(fd)}
+const drop=$('drop');
+drop.onclick=()=>$('fw').click();$('fw').onchange=e=>pickFw(e.target.files[0]);
+drop.ondragover=e=>{e.preventDefault();drop.classList.add('over')};drop.ondragleave=()=>drop.classList.remove('over');
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');pickFw(e.dataTransfer.files[0])};
+
+// ---- Photos: crop to 240x240 and encode as a baseline JPEG in the browser
+async function loadPhotos(){
+  try{const d=await(await fetch('/api/photos')).json(),list=$('phList');
+    list.innerHTML=d.files.length?'':'<p class="note" style="grid-column:1/-1;margin:0">No photos yet.</p>';
+    d.files.forEach(f=>{const el=document.createElement('div');el.className='ph';
+      const shown=/\.jpe?g$/i.test(f.name);
+      el.innerHTML='<img loading="lazy" alt=""><button title="Delete">×</button>'+(shown?'':'<span class="tag">Not shown</span>');
+      el.querySelector('img').src='/photo/'+encodeURIComponent(f.name);
+      el.querySelector('button').onclick=async()=>{if(!confirm('Delete this photo?'))return;
+        try{await req('/api/photos/delete',form({name:f.name}));loadPhotos()}catch(e){toast(e.message,1)}};
+      list.appendChild(el)});
+    if(d.total){const pct=Math.round(d.used/d.total*100);$('phMeter').style.width=pct+'%';
+      $('phNote').textContent=`${d.files.length} photo${d.files.length==1?'':'s'} · storage ${pct}% used (${(d.used/1048576).toFixed(1)} of ${(d.total/1048576).toFixed(1)} MB). The Photo face shows a new one every minute.`}
+  }catch(e){}}
+function cropTo240(file){return new Promise((ok,bad)=>{const img=new Image(),url=URL.createObjectURL(file);
+  img.onload=()=>{const c=document.createElement('canvas');c.width=c.height=240;const s=Math.min(img.naturalWidth,img.naturalHeight);
+    c.getContext('2d').drawImage(img,(img.naturalWidth-s)/2,(img.naturalHeight-s)/2,s,s,0,0,240,240);URL.revokeObjectURL(url);
+    c.toBlob(b=>b?ok(b):bad(new Error('Could not encode')),'image/jpeg',0.85)};
+  img.onerror=()=>{URL.revokeObjectURL(url);bad(new Error('Not an image'))};img.src=url})}
+async function addPhotos(files){
+  if(recovery){toast('Read-only in recovery',1);return}
+  for(const file of files){
+    const tile=document.createElement('div');tile.className='ph busy';tile.textContent='Uploading…';$('phList').prepend(tile);
+    try{const blob=await cropTo240(file);
+      const base=(file.name.replace(/\.[^.]*$/,'').toLowerCase().replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'')||'photo').slice(0,14);
+      const name=base+'-'+Date.now().toString(36).slice(-5)+'.jpg';
+      const fd=new FormData();fd.append('photo',blob,name);
+      const r=await fetch('/api/photos/upload',{method:'POST',body:fd});const t=await r.text();
+      if(!r.ok||t!=='OK')throw new Error(t||'Upload failed');
+    }catch(e){toast(file.name+': '+e.message,1)}
+    tile.remove()}
+  toast('Photos updated');loadPhotos()}
+const phDrop=$('phDrop');
+phDrop.onclick=()=>$('phFile').click();$('phFile').onchange=e=>{addPhotos([...e.target.files]);e.target.value=''};
+phDrop.ondragover=e=>{e.preventDefault();phDrop.classList.add('over')};phDrop.ondragleave=()=>phDrop.classList.remove('over');
+phDrop.ondrop=e=>{e.preventDefault();phDrop.classList.remove('over');addPhotos([...e.dataTransfer.files].filter(f=>f.type.startsWith('image/')))};
+
+all('select.hours').forEach(s=>{for(let h=0;h<24;h++)s.add(new Option((h%12||12)+(h<12?' am':' pm'),h))});
+bindInputs();renderThemes();
+(async()=>{try{fillConfig(await(await fetch('/config')).json())}catch(e){toast('Could not load settings',1)}await poll();loadPhotos();setInterval(poll,5000)})();
+</script>
+</body>
+</html>
