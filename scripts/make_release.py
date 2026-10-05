@@ -47,5 +47,5 @@ out.mkdir(exist_ok=True)
 name = f"SDPro_SmartClockOSS_v{version}.bin"
 shutil.copy(image, out / name)
 digest = hashlib.sha256(data).hexdigest()
-(out / "SHA256SUMS.txt").write_text(f"{digest}  {name}\n", encoding="utf-8")
+(out / "SHA256SUMS.txt").write_bytes(f"{digest}  {name}\n".encode())   # LF, or `sha256sum -c` fails
 print(f"{out / name}\n{len(data)} bytes, sha256 {digest}\nNo WiFi details in the image.")
