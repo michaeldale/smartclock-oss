@@ -6,11 +6,11 @@ history.
 
 ## Release and checkout
 
-The latest release is **0.1.1** (2026-10-06, tag `v0.1.1`), published on GitHub as
-`michaeldale/smartclock-oss` with the image `SDPro_SmartClockOSS_v0.1.1.bin` built by
-`scripts/make_release.py` (no WiFi details). 0.1.0 (`v0.1.0`, `6d94d08`) was the first
-image flashed over stock SD Pro V1.0.6 on the one test unit, at 10.0.1.118
-([record](decisions/2026-10-05-first-flash-over-stock.md)).
+The latest release is **0.1.2** (2026-10-06, tag `v0.1.2`), published on GitHub as
+`michaeldale/smartclock-oss` with `SDPro_SmartClockOSS_v0.1.2.bin` built by
+`scripts/make_release.py` (no WiFi details). It runs on the test unit at 10.0.1.118.
+0.1.1 was the first public release; 0.1.0 (`v0.1.0`, `6d94d08`) was the first image
+flashed over stock SD Pro V1.0.6 ([record](decisions/2026-10-05-first-flash-over-stock.md)).
 
 ## What has been shown on the device
 
@@ -29,6 +29,7 @@ image flashed over stock SD Pro V1.0.6 on the one test unit, at 10.0.1.118
 | Seven clock faces, forecast, photos | Flashed (`4252007`). Live: current weather (light rain, 18.3 C), 4 forecast days, free heap 32 KB. Look on the panel not yet reported ([record](decisions/2026-10-05-clock-faces-without-a-framebuffer.md)) |
 | Stock photos | All removed on request: `1.jpg` (replaced by a generic `dusk.jpg`), then `like.gif` and `space man.gif` once `016451e` could delete any file. `space man.gif` showed broken because `/photo/` did not decode `%20`; fixed in the checkout |
 | Crash-marker recovery, format storage | Offline tests only |
+| 0.1.2: device password, update banner, sunset night mode, backup/restore | Flashed: sign-in, Show on clock (hidden again on sign-in) and the build ID confirmed on the device ([record](decisions/2026-10-06-passwords-and-flash-savings.md)) |
 
 ## Offline checks
 
@@ -42,15 +43,13 @@ full redraws.
 
 ## Flash budget
 
-The image is 497,216 bytes, 96% of the 0x7E000 OTA limit, leaving about 19 KB.
+The checkout's image is 472,336 bytes, 92% of the 0x7E000 OTA limit, leaving about
+43 KB, after 34 KB was freed ([record](decisions/2026-10-06-passwords-and-flash-savings.md)).
 Measure any addition before it lands; the build refuses an image over the limit.
 
 ## Next
 
-1. Flash the faces build; check each face, the flip animation and a photo on the panel.
-2. Check mDNS from a browser and a phone.
-3. Release 0.1.1 per the [plan](plans/0.1.1.md) checklist.
-4. Then the [roadmap](plans/roadmap.md), starting with authentication.
+1. Then the [roadmap](plans/roadmap.md) candidates: a way back to stock, CI, crash reports.
 
 ## Open issues
 

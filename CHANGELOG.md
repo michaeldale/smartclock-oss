@@ -4,6 +4,38 @@ All notable SmartClock-OSS changes are recorded here. Versions follow semantic
 versioning. `/version` on the device reports the version it was built as; a
 `-dev` suffix marks a build from an unreleased checkout.
 
+## 0.1.2 - 2026-10-06
+
+### Upgrading from 0.1.1
+
+After this update the settings page asks for the clock's password, and the
+**Smart Weather Clock** setup network needs it too. To find it, press **Show the
+password on the clock** on the sign-in page, then read it off the clock. You can
+change it under System → Password.
+
+### Added
+
+- **A device password** for the settings page and the setup network (WPA2). It
+  is generated on first boot (10 characters) and kept outside the file system so
+  recovery can read it. The clock shows it on its setup and recovery screens, or
+  on request from the sign-in page until you sign in (at most 60 s). Sessions use an `HttpOnly`,
+  `SameSite=Strict` cookie, and five wrong attempts lock sign-in for a minute.
+  Recovery mode stays open, so a forgotten password cannot lock you out
+  ([record](docs/decisions/2026-10-06-passwords-and-flash-savings.md)).
+- **Update available** banner. The settings page checks GitHub for a newer
+  release; the clock itself needs no internet access for this.
+- **Night mode from sunset to sunrise**, from Open-Meteo's daily sun times.
+- **Backup and restore** of settings as a JSON file, plus **Forget WiFi** and
+  **Reset all settings**. Backups contain no WiFi details or password.
+
+### Changed
+
+- **34 KB of flash freed** without removing features: float printf/scanf no
+  longer forced into the link, lwIP without IP forwarding/fragmentation
+  features, no unused serial driver, and no `strftime`. Image 472 KB (92%).
+- Brightness changes respect night dimming immediately instead of at the next
+  minute.
+
 ## 0.1.1 - 2026-10-06
 
 ### Fixed

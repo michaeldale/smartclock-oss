@@ -9,6 +9,7 @@ struct Weather {
   float temp = 0, feels = 0, tempMin = 0, tempMax = 0, wind = 0;   // metric: C, m/s
   int humidity = 0, pressure = 0, clouds = 0;
   String main, desc, icon, cityName;
+  int16_t sunrise = -1, sunset = -1;   // today, minutes after local midnight; -1 unknown
   String error;                        // last failure, for the page and the faces
   uint32_t lastFetch = 0;              // millis() of the last attempt
   uint32_t lastSuccess = 0;            // millis() of the last successful fetch

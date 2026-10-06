@@ -21,6 +21,8 @@ are needed.
 - **A modern settings page** for faces, colours, brightness, night dimming, time zone,
   weather, WiFi, photos and firmware updates. It works on phones and in dark mode, and
   needs no internet connection on the clock's setup network.
+- **Password protected:** one password, shown on the clock, protects the settings page
+  and the setup network.
 - **Hard to brick:** firmware updates are checked before anything is written, the setup
   network is always on, and there is a recovery mode reached by power cycling. See
   [Recovery](#recovery).
@@ -44,15 +46,16 @@ this firmware is not for your clock.
 > USB-serial adapter wired to the board. Keep the clock powered during the update. If
 > something goes wrong after installing, see [Recovery](#recovery).
 
-1. Download **`SDPro_SmartClockOSS_v0.1.1.bin`** from the
+1. Download **`SDPro_SmartClockOSS_v<version>.bin`** from the
    [latest release](../../releases/latest). Keep the file name: the stock update page only
    accepts files whose names start with `SDP`.
 2. Open the clock's web page in a browser (its IP address is shown on the clock when it
    starts), and find **Firmware Update (OTA)**.
 3. Choose the downloaded file and press **Start Update**. Confirm, then wait for
    "Update Success". The clock restarts by itself within about 30 seconds.
-4. On your phone or computer, join the WiFi network **Smart Weather Clock** (no
-   password) and open **http://192.168.4.1/**.
+4. On your phone or computer, join the WiFi network **Smart Weather Clock** with the
+   password shown on the clock, and open **http://192.168.4.1/**. Sign in with the same
+   password.
 5. In the **WiFi** card, pick your network, enter its password, and press
    **Connect & restart**.
 6. The clock shows its new address when it connects. Open that address in a browser to
@@ -69,9 +72,11 @@ accepts only SmartClock-OSS images and checks each one before writing.
 
 - The **Smart Weather Clock** setup network stays on at all times, so you can always
   reach **http://192.168.4.1/**, even when your home WiFi is down or wrong.
+- **Forgotten the password?** On the sign-in page, press **Show the password on the
+  clock**, or use recovery mode below, which shows it on screen.
 - **Recovery mode:** power the clock on for less than 10 seconds, twice, then power it on
-  and leave it. The screen shows "Recovery". From there you can install firmware, and
-  **Restart** returns to normal. The clock also enters recovery by itself if it crashes
+  and leave it. The screen shows "Recovery". In recovery the setup network is open and
+  no sign-in is needed. You can install firmware, and **Restart** returns to normal. The clock also enters recovery by itself if it crashes
   during startup.
 - Settings and photos live in the clock's own storage and survive firmware updates.
 
@@ -79,10 +84,9 @@ More detail: [docs/MIGRATION.md](docs/MIGRATION.md).
 
 ## Known limitations
 
-- **No security on the setup network or settings page.** Anyone within WiFi range can
-  join the setup network and change settings or install firmware. The stock firmware had
-  the same exposure. Adding passwords is planned
-  ([issue](docs/issues/2026-10-05-ap-and-ota-unauthenticated.md)).
+- The web page uses plain HTTP: someone already on your network can watch the traffic.
+  The password stops them changing anything without it.
+- Recovery mode (power cycling, or a crash during startup) is deliberately open.
 - Animated GIFs are not played; the Photo face shows JPEGs.
 - There is no way back to the stock firmware without a USB-serial adapter.
 

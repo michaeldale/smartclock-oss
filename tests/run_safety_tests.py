@@ -74,5 +74,21 @@ assert image.stat().st_size <= 0x7E000, "image exceeds OTA budget"
 data = image.read_bytes()
 fs = data.find((0x405FA000).to_bytes(4, "little"))
 assert fs > 0 and (0x40300000).to_bytes(4, "little") in data[fs - 8:fs], "FS layout differs from stock"
-print("PASS: stock-matching 4m3m layout, OTA size budget, non-formatting mount, early recovery server,")
-print("      power-cycle/crash recovery (no button), safe restarts, STA backoff, persistent AP")
+# Float printf/scanf are dropped from the link (scripts/link_options.py), so no source
+# may format or parse floats with them: %f/%e/%g would print nothing on the device.
+assert "post:scripts/link_options.py" in ini
+for f in list((root / "src").glob("*.cpp")) + list((root / "src").glob("*.h")):
+    code = f.read_text(encoding="utf-8")
+    assert not re.search(r'"[^"\n]*%[-+ #0-9.]*[eEfgG][^"\n]*"', code), f"float printf format in {f.name}"
+    assert "scanf" not in code and "toFloat" not in code, f"float parsing in {f.name}"
+# Every handler that changes the clock checks the sign-in first.
+for name in ("handleApiSet", "handleConnect", "handleFormatStorage", "handlePhotoDelete", "handleWeatherSync",
+             "handlePasswordChange", "handleSettingsExport", "handleSettingsImport", "handleSettingsReset",
+             "handleWifiForget", "handleScanWifi"):
+    body = source[source.index("void " + name + "()"):]
+    body = body[:body.index("\n}\n")]
+    assert "requireAuth()" in body, f"{name} does not require sign-in"
+assert "if (!requestAuthorized()) { failOta(" in handler, "OTA upload must require sign-in"
+assert "if (!requestAuthorized()) { photoError" in source, "photo upload must require sign-in"
+print("PASS: stock-matching 4m3m layout, OTA size budget, no float printf, sign-in guards, non-formatting mount,")
+print("      early recovery server, power-cycle/crash recovery (no button), safe restarts, STA backoff, persistent AP")

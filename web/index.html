@@ -91,6 +91,7 @@ input[type=color]{width:34px;height:34px;padding:0;border:1px solid var(--line);
 input[type=color]::-webkit-color-swatch-wrapper{padding:3px}input[type=color]::-webkit-color-swatch{border:0;border-radius:6px}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-weight:600;font-size:14px;border-radius:10px;padding:9px 14px;
   border:1px solid var(--line);background:var(--surface);color:var(--text);cursor:pointer;transition:filter .15s}
+a.btn{text-decoration:none}
 .btn:hover{filter:brightness(.97)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.danger{color:var(--bad)}
@@ -120,6 +121,12 @@ input[type=color]::-webkit-color-swatch-wrapper{padding:3px}input[type=color]::-
 dl{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin:0;font-size:14px}
 dt{color:var(--muted)}dd{margin:0;overflow:hidden;text-overflow:ellipsis}
 a{color:var(--accent)}
+#login{position:fixed;inset:0;z-index:8;background:var(--bg);display:grid;place-items:center;padding:16px}
+#login .card{width:100%;max-width:380px}
+#login h1{font-size:20px;margin:0 0 6px}
+.linkbtn{border:0;background:none;color:var(--accent);font:inherit;font-weight:600;cursor:pointer;padding:0}
+.banner.info{background:color-mix(in srgb,var(--accent) 12%,var(--surface));border-color:color-mix(in srgb,var(--accent) 40%,transparent)}
+.sub{font-size:13px;font-weight:700;color:var(--muted);margin:18px 0 4px;text-transform:uppercase;letter-spacing:.05em}
 #toast{position:fixed;left:50%;bottom:20px;transform:translate(-50%,20px);opacity:0;background:var(--text);color:var(--bg);
   padding:9px 16px;border-radius:99px;font-size:14px;font-weight:600;transition:.25s;pointer-events:none;z-index:9}
 #toast.show{opacity:1;transform:translate(-50%,0)}#toast.bad{background:var(--bad);color:#fff}
@@ -137,6 +144,7 @@ a{color:var(--accent)}
 </div></header>
 
 <main>
+  <div class="banner info" id="updBanner" hidden></div>
   <div class="banner" id="recovery" hidden><strong>Recovery mode.</strong> Settings are read-only. You can still update the firmware;
     <a href="#" onclick="restart();return false">restart</a> to leave recovery.</div>
 
@@ -173,10 +181,13 @@ a{color:var(--accent)}
 
   <section class="card settings">
     <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z"/></svg>Night mode</h2>
-    <div class="row"><label for="nightmode">Dim at night<span class="hint">Lower the backlight between these hours</span></label>
+    <div class="row"><label for="nightmode">Dim at night<span class="hint">Lower the backlight while it is dark</span></label>
       <label class="switch"><input type="checkbox" id="nightmode" data-key="nightmode"><span></span></label></div>
-    <div class="row"><span class="lbl">From</span><select class="sm hours" id="starttime" data-key="starttime"></select></div>
-    <div class="row"><span class="lbl">Until</span><select class="sm hours" id="stoptime" data-key="stoptime"></select></div>
+    <div class="row"><span class="lbl">Schedule</span>
+      <div class="seg" data-key="nightauto"><button data-v="1">Sunset to sunrise</button><button data-v="0">Set hours</button></div></div>
+    <div class="row" id="sunRow"><span class="lbl">Today<span class="hint" id="sunTimes">Needs a weather location</span></span></div>
+    <div class="row hoursRow"><span class="lbl">From</span><select class="sm hours" id="starttime" data-key="starttime"></select></div>
+    <div class="row hoursRow"><span class="lbl">Until</span><select class="sm hours" id="stoptime" data-key="stoptime"></select></div>
     <div class="row"><span class="lbl">Night brightness</span>
       <div class="range"><input type="range" min="0" max="100" id="nightbrightness" data-key="nightbrightness"><output></output></div></div>
   </section>
@@ -266,9 +277,41 @@ a{color:var(--accent)}
     <div class="btns"><button class="btn" onclick="restart()">Restart</button>
       <button class="btn danger" id="fmtBtn" onclick="formatFs()" hidden>Format storage</button></div>
     <p class="note" id="fmtNote" hidden>Storage could not be mounted. Formatting erases the whole storage area, including any photos and settings from the original firmware.</p>
+
+    <div class="settings">
+    <div class="sub">Password</div>
+    <p class="note" style="margin-top:0">One password protects this page and the <strong>Smart Weather Clock</strong> setup network.
+      It is not secret from anyone who can see the clock: the sign-in page has <strong>Show the password on the clock</strong>,
+      which displays it on the clock's screen for up to a minute, and the clock also shows it while setting up WiFi.</p>
+    <div class="field"><label for="newPass">New password</label>
+      <div class="pw"><input type="password" id="newPass" autocomplete="new-password" spellcheck="false" placeholder="8 to 31 characters, no spaces"><button type="button" onclick="reveal('newPass',this)">Show</button></div></div>
+    <div class="btns"><button class="btn" onclick="changePassword()">Change password</button><button class="btn" onclick="logout()">Sign out</button></div>
+
+    <div class="sub">Backup</div>
+    <p class="note" style="margin-top:0">Settings only; WiFi details, the password and photos are not included.</p>
+    <div class="btns"><a class="btn" href="/api/settings/export" download="smartclock-settings.json">Download backup</a>
+      <button class="btn" onclick="$('restoreFile').click()">Restore backup…</button>
+      <input type="file" id="restoreFile" accept=".json,application/json" hidden></div>
+
+    <div class="sub">Reset</div>
+    <div class="btns"><button class="btn danger" onclick="forgetWifi()">Forget WiFi</button>
+      <button class="btn danger" onclick="resetSettings()">Reset all settings</button></div>
+    <p class="note">Reset clears every setting and the WiFi details. Photos and the password are kept.</p>
+    </div>
   </section>
 </main>
 
+<div id="login" hidden><div class="card">
+  <h1>Sign in</h1>
+  <p class="note" style="margin-top:0">Enter the clock's password. It is shown on the clock while it is setting up WiFi.</p>
+  <form onsubmit="login(event)">
+    <div class="field"><label for="loginPass">Password</label>
+      <div class="pw"><input type="password" id="loginPass" autocomplete="current-password" spellcheck="false" autofocus><button type="button" onclick="reveal('loginPass',this)">Show</button></div></div>
+    <div class="btns"><button class="btn primary" type="submit">Sign in</button></div>
+  </form>
+  <p class="note">Forgotten it? <button class="linkbtn" onclick="showOnClock()">Show the password on the clock</button> for a minute.</p>
+  <div class="msg" id="loginMsg"></div>
+</div></div>
 <div id="toast"></div>
 <div id="overlay"><div><div class="spin"></div><strong id="ovT">Restarting</strong><div class="note" id="ovS">The page will reconnect automatically.</div></div></div>
 
@@ -284,7 +327,40 @@ const THEMES=[[0,'Classic','<rect x="4" y="8" width="30" height="16" rx="3"/><pa
  [4,'Simple','<path d="M9 19h20"/>'],[2,'Photo','<rect x="6" y="8" width="26" height="22" rx="3"/><circle cx="14" cy="16" r="3"/><path d="M6 27l8-7 6 5 4-3 8 6"/>']];
 
 function toast(m,bad){const t=$('toast');t.textContent=m;t.className='show'+(bad?' bad':'');clearTimeout(toast.h);toast.h=setTimeout(()=>t.className='',2200)}
-async function req(path,opt){const r=await fetch(path,opt);const t=await r.text();if(!r.ok)throw new Error(t||('HTTP '+r.status));return t}
+async function req(path,opt){const r=await fetch(path,opt);const t=await r.text();if(r.status===401)showLogin();if(!r.ok)throw new Error(t||('HTTP '+r.status));return t}
+// ---- Sign-in
+function showLogin(){if(!$('login').hidden)return;$('login').hidden=false;$('loginMsg').textContent='';setTimeout(()=>$('loginPass').focus(),50)}
+async function login(e){e.preventDefault();const m=$('loginMsg');m.className='msg';m.textContent='Signing in…';
+  try{await req('/api/auth/login',form({password:$('loginPass').value}));$('login').hidden=true;$('loginPass').value='';
+    fillConfig(await(await fetch('/config')).json());await poll();loadPhotos()}
+  catch(e){m.className='msg bad';m.textContent=e.message}}
+async function showOnClock(){try{await req('/api/auth/reveal',{method:'POST'});toast('Look at the clock')}catch(e){toast(e.message,1)}}
+async function logout(){try{await req('/api/auth/logout',{method:'POST'})}catch(e){}showLogin()}
+async function changePassword(){const p=$('newPass').value;
+  if(!/^[\x21-\x7e]{8,31}$/.test(p)){toast('Use 8 to 31 characters, no spaces',1);return}
+  if(!confirm('Change the password? Devices on the setup network will need the new one.'))return;
+  try{await req('/api/auth/password',form({password:p}));$('newPass').value='';toast('Password changed')}catch(e){toast(e.message,1)}}
+// ---- Backup and reset
+$('restoreFile').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;
+  try{const t=await req('/api/settings/import',{method:'POST',headers:{'Content-Type':'application/json'},body:await f.text()});
+    toast(t);fillConfig(await(await fetch('/config')).json())}catch(err){toast(err.message,1)}};
+async function forgetWifi(){if(!confirm('Forget the saved WiFi network? The clock restarts and waits on its setup network.'))return;
+  try{await req('/api/wifi/forget',{method:'POST'});waitForReboot('Restarting','Join the Smart Weather Clock network to set up WiFi again.')}catch(e){toast(e.message,1)}}
+async function resetSettings(){if(!confirm('Reset all settings, including WiFi? Photos and the password are kept.'))return;
+  try{await req('/api/settings/reset',form({confirm:'reset'}));waitForReboot('Resetting','Join the Smart Weather Clock network to set up the clock again.')}catch(e){toast(e.message,1)}}
+// ---- Update check: the browser asks GitHub; the clock itself needs no internet access for this.
+const REPO='michaeldale/smartclock-oss';
+const vnum=v=>(v||'').replace(/^v/,'').split('-')[0].split('.').map(n=>+n||0);
+const newer=(a,b)=>{const x=vnum(a),y=vnum(b);for(let i=0;i<3;i++){if((x[i]||0)!==(y[i]||0))return (x[i]||0)>(y[i]||0)}return false};
+async function checkUpdate(current){
+  let rel=null;
+  try{const c=JSON.parse(localStorage.getItem('scRel')||'null');if(c&&Date.now()-c.at<6*3600e3)rel=c.rel}catch(e){}
+  if(!rel){try{const r=await fetch('https://api.github.com/repos/'+REPO+'/releases/latest');if(!r.ok)return;
+    const j=await r.json();rel={tag:j.tag_name,url:j.html_url};try{localStorage.setItem('scRel',JSON.stringify({at:Date.now(),rel}))}catch(e){}}catch(e){return}}
+  const b=$('updBanner');
+  if(rel&&newer(rel.tag,current)){b.hidden=false;b.innerHTML='<strong>Update available:</strong> '+rel.tag.replace(/</g,'')+
+    ' (you have '+current+'). <a href="'+encodeURI(rel.url)+'" target="_blank" rel="noopener">Download it</a>, then install it from the Firmware update card.'}
+  else b.hidden=true}
 const form=o=>({method:'POST',body:new URLSearchParams(o)});
 async function set(key,value){
   if(recovery){toast('Read-only in recovery',1);return false}
@@ -300,7 +376,7 @@ function bindInputs(){
   all('[data-key]').forEach(el=>{
     const key=el.dataset.key;
     if(el.classList.contains('seg')){
-      el.querySelectorAll('button').forEach(b=>b.onclick=async()=>{if(await set(key,b.dataset.v)){paintSeg(el,b.dataset.v);if(key==='city')setTimeout(poll,300)}});return}
+      el.querySelectorAll('button').forEach(b=>b.onclick=async()=>{if(await set(key,b.dataset.v)){paintSeg(el,b.dataset.v);if(key==='nightauto')nightRows(b.dataset.v);if(key==='city')setTimeout(poll,300)}});return}
     if(el.id==='tz'){el.onchange=()=>{const c=el.value==='custom';$('tzCustomBox').hidden=!c;if(!c)set('tz',el.value);else $('tzCustom').focus()};return}
     if(el.type==='range'){const out=el.nextElementSibling,show=()=>out.textContent=el.value+'%';
       el.addEventListener('input',()=>{show();if(el.dataset.live){clearTimeout(el.h);el.h=setTimeout(()=>set(key,el.value),250)}});
@@ -311,6 +387,7 @@ function bindInputs(){
   $('tzCustom').onchange=e=>{const v=e.target.value.trim();if(v)set('tz',v)};
   $('themeInterval').addEventListener('change',()=>{cfg.themeInterval=$('themeInterval').value;$('rotBox').hidden=!(+cfg.themeInterval>0)});
 }
+function nightRows(auto){auto=['1','true'].includes(String(auto));all('.hoursRow').forEach(r=>r.hidden=auto);$('sunRow').hidden=!auto}
 function paintSeg(el,v){el.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v===String(v)))}
 
 function renderThemes(){
@@ -333,6 +410,7 @@ function fillConfig(c){
   paintSeg(document.querySelector('[data-key=hour12]'),c.hour12?1:0);
   paintSeg(document.querySelector('[data-key=celsius]'),c.celsius?1:0);
   paintSeg(document.querySelector('[data-key=mile]'),c.mile?1:0);
+  paintSeg(document.querySelector('[data-key=nightauto]'),c.nightauto?1:0);nightRows(c.nightauto);
   const z=$('tz');
   if(!c.tz){const o=new Option('Fixed offset '+(c.timezone>=0?'+':'')+(c.timezone/60)+' h (no daylight saving)','');z.add(o,0);z.value=''}
   else if([...z.options].some(o=>o.value===c.tz))z.value=c.tz;
@@ -345,7 +423,7 @@ const up=s=>{const d=Math.floor(s/86400),h=Math.floor(s/3600)%24,m=Math.floor(s/
 function fillStatus(s){
   st=s;recovery=!!s.recovery;
   $('recovery').hidden=!recovery;all('.settings').forEach(c=>c.classList.toggle('locked',recovery));
-  $('ver').textContent='Firmware '+s.version;$('sVer').textContent=s.version;
+  $('ver').textContent='Firmware '+s.version;$('sVer').textContent=s.version+(s.build?' · build '+s.build:'');
   const pill=$('pill');
   pill.className='pill '+(recovery?'bad':s.connected?'ok':'warn');
   pill.lastElementChild.textContent=recovery?'Recovery':s.connected?'Online':'Setup network only';
@@ -359,6 +437,7 @@ function fillStatus(s){
     $('tWxS').textContent=(s.weather.city||'')+' · '+s.weather.desc+' · '+s.weather.humidity+'%'}
   else{$('tWx').textContent=s.weatherError?'Unavailable':'Waiting…';
     $('tWxS').textContent=s.weatherError||'First update on its way'}
+  $('sunTimes').textContent=s.sunset?'Dims at sunset '+s.sunset+', brightens at sunrise '+s.sunrise:'Needs weather for your city (see Weather)';
   const ago=s.weatherAge;
   $('wxAge').textContent=ago===undefined?(s.weatherError?'Not yet: '+s.weatherError:'Not yet'):ago<60?'Just now':ago<3600?Math.floor(ago/60)+' min ago':Math.floor(ago/3600)+' h ago';
   $('wxLoc').textContent=s.weatherError&&!s.weather?'⚠ '+s.weatherError:s.location?'Found: '+s.location:'A city name, optionally with a country code: “Sydney, AU”.';
@@ -370,7 +449,7 @@ function fillStatus(s){
   $('sReset').textContent=s.resetReason||'—';
   $('fmtBtn').hidden=$('fmtNote').hidden=!s.storageMountFailed;
 }
-async function poll(){try{fillStatus(await(await fetch('/status')).json())}catch(e){const p=$('pill');p.className='pill bad';p.lastElementChild.textContent='Offline'}}
+async function poll(){try{const s=await(await fetch('/status')).json();fillStatus(s);if(s.signedIn===false&&!s.recovery)showLogin();if(!checkUpdate.done&&s.version){checkUpdate.done=1;checkUpdate(s.version)}}catch(e){const p=$('pill');p.className='pill bad';p.lastElementChild.textContent='Offline'}}
 
 async function scan(){
   const b=$('scanBtn');b.disabled=true;b.textContent='Scanning…';

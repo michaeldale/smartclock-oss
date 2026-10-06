@@ -25,6 +25,9 @@
 #include "faces.h"
 
 
+#define FW_VERSION "0.1.2"   // see CHANGELOG.md
+#include "build_info.h"   // FW_BUILD: commit, "+" if uncommitted changes, build time
+
 // ----------------------------------------------------------------------------
 // Construct the driver only during optional startup: even its constructor touches GPIO.
 TFT_eSPI& clockDisplay() {
@@ -108,11 +111,54 @@ void safeRestart() {
   ESP.restart();
 }
 
+// ---------------------------- Device password -------------------------------
+// One password protects the setup network (WPA2) and the settings page. It lives in
+// the EEPROM sector, not LittleFS, so recovery can still read it. Generated on first
+// boot from the hardware RNG; shown on the setup screen, the recovery screen, and on
+// request from the login page ("Show on clock"), so knowing it needs sight of the clock.
+constexpr int PASS_ADDR = 0xfc0;            // 4-byte magic + up to 31 chars + NUL
+constexpr uint32_t PASS_MAGIC = 0x53435057;
+constexpr size_t PASS_MIN = 8, PASS_MAX = 31;
+String devicePassword;
+
+bool validPassword(const String& p) {
+  if (p.length() < PASS_MIN || p.length() > PASS_MAX) return false;
+  for (unsigned i = 0; i < p.length(); ++i) if (p[i] < 0x21 || p[i] > 0x7e) return false;   // printable, no spaces
+  return true;
+}
+
+bool storePassword(const String& p) {
+  EEPROM.begin(SPI_FLASH_SEC_SIZE);
+  for (int i = 0; i < 4; ++i) EEPROM.write(PASS_ADDR + i, uint8_t(PASS_MAGIC >> (8 * i)));
+  for (size_t i = 0; i <= PASS_MAX; ++i) EEPROM.write(PASS_ADDR + 4 + i, i < p.length() ? p[i] : 0);
+  return EEPROM.end();
+}
+
+void loadPassword() {
+  EEPROM.begin(SPI_FLASH_SEC_SIZE);
+  uint32_t magic = 0;
+  for (int i = 0; i < 4; ++i) magic |= uint32_t(EEPROM.read(PASS_ADDR + i)) << (8 * i);
+  String p;
+  if (magic == PASS_MAGIC)
+    for (size_t i = 0; i < PASS_MAX; ++i) { char c = EEPROM.read(PASS_ADDR + 4 + i); if (!c) break; p += c; }
+  EEPROM.end();
+  if (validPassword(p)) { devicePassword = p; return; }
+  // 10 characters from a 31-letter alphabet without 0/o, 1/i/l: ~49 bits.
+  static const char alphabet[] = "23456789abcdefghjkmnpqrstuvwxyz";
+  p = "";
+  for (int i = 0; i < 10; ++i) p += alphabet[ESP.random() % (sizeof(alphabet) - 1)];
+  storePassword(p);
+  devicePassword = p;
+}
+
+bool requireAuth();          // sign-in guard, defined with the web API below
+bool requestAuthorized();
 bool wxRefresh = true;    // fetch at once: at boot, and when the city changes
 // Optional work waits for headroom instead of risking an allocation failure.
 constexpr uint32_t MDNS_MIN_HEAP = 28000, WEATHER_MIN_HEAP = 16000;
 uint32_t heapLow = UINT32_MAX;   // lowest free heap seen, for /status
 uint32_t faceHoldUntil = 0;   // keep a status screen (e.g. the IP) up until then
+bool brightnessDirty = false;  // settings changed: re-evaluate night dimming now
 
 volatile bool buttonPressed = false;
 IRAM_ATTR void onButton() { buttonPressed = true; }
@@ -128,6 +174,10 @@ void setBacklight(int percent) {
 
 bool isNight(const struct tm& t) {
   if (!cfg.nightMode) return false;
+  if (cfg.nightAuto && wx.sunrise >= 0 && wx.sunset > wx.sunrise) {   // sunset to sunrise
+    int m = t.tm_hour * 60 + t.tm_min;
+    return m < wx.sunrise || m >= wx.sunset;
+  }
   int h = t.tm_hour;
   if (cfg.startHour <= cfg.stopHour) return h >= cfg.startHour && h < cfg.stopHour;
   return h >= cfg.startHour || h < cfg.stopHour;   // wraps midnight
@@ -191,6 +241,7 @@ void serviceWeather() {
 // "Sync now" on the settings page: fetch immediately and report the outcome.
 // Limited to one request per 10 s so the button cannot hammer the service.
 void handleWeatherSync() {
+  if (!requireAuth()) return;
   if (recoveryMode || !storageReady) { server.send(503, "text/plain", "Unavailable in recovery"); return; }
   if (WiFi.status() != WL_CONNECTED) { server.send(503, "text/plain", "Not connected to WiFi"); return; }
   if (wx.lastFetch && millis() - wx.lastFetch < 10000) { server.send(429, "text/plain", "Just synced; try again in a few seconds"); return; }
@@ -206,6 +257,101 @@ void applyTime() {
   else configTime(cfg.timezoneMin * 60, 0, cfg.ntp.c_str());
 }
 
+// ---------------------------- Sign-in ---------------------------------------
+// A session is a random token in a cookie (HttpOnly, SameSite=Strict), kept in RAM:
+// a reboot signs everyone out. Recovery mode needs no sign-in, so a lost password
+// can never lock the owner out; entering it takes power cycling the clock.
+constexpr int SESSIONS = 4;
+String sessions[SESSIONS];
+uint8_t loginFails = 0;
+uint32_t loginLockedUntil = 0, revealUntil = 0, revealAt = 0;
+
+// Ends "Show on clock" now: the loop sees the deadline has passed and restores the
+// face (or the setup/recovery screen). 0 means "not showing", so never store 0.
+void endReveal() {
+  if (revealUntil) revealUntil = millis() ? millis() : 1;
+}
+
+String requestToken() {
+  String c = server.header("Cookie");
+  int i = c.indexOf("sc=");
+  if (i < 0) return "";
+  int end = c.indexOf(';', i);
+  return c.substring(i + 3, end < 0 ? c.length() : end);
+}
+
+bool sameSecret(const String& a, const String& b) {   // constant time for equal lengths
+  if (a.length() != b.length()) return false;
+  uint8_t diff = 0;
+  for (unsigned i = 0; i < a.length(); ++i) diff |= a[i] ^ b[i];
+  return diff == 0;
+}
+
+bool requestAuthorized() {
+  if (recoveryMode) return true;
+  String t = requestToken();
+  if (t.length() != 32) return false;
+  for (const String& s : sessions) if (sameSecret(s, t)) return true;
+  return false;
+}
+
+// Guard for handlers: answers 401 and returns false when not signed in.
+bool requireAuth() {
+  if (requestAuthorized()) return true;
+  server.send(401, "text/plain", "Sign in first");
+  return false;
+}
+
+void handleLogin() {
+  if (millis() < loginLockedUntil) { server.send(429, "text/plain", "Too many attempts; wait a minute"); return; }
+  if (!sameSecret(server.arg("password"), devicePassword)) {
+    delay(800);   // slows guessing; with the lockout, ~5 tries a minute
+    if (++loginFails >= 5) { loginFails = 0; loginLockedUntil = millis() + 60000; }
+    server.send(403, "text/plain", "Wrong password");
+    return;
+  }
+  loginFails = 0;
+  endReveal();   // signed in: the password has done its job, take it off the clock
+  char token[33];
+  for (int i = 0; i < 4; ++i) snprintf(token + i * 8, 9, "%08x", (unsigned)ESP.random());
+  static int next = 0;
+  sessions[next] = token;
+  next = (next + 1) % SESSIONS;
+  server.sendHeader("Set-Cookie", String("sc=") + token + "; Path=/; HttpOnly; SameSite=Strict");
+  server.send(200, "text/plain", "OK");
+}
+
+void handleLogout() {
+  String t = requestToken();
+  for (String& s : sessions) if (t.length() && sameSecret(s, t)) s = "";
+  server.sendHeader("Set-Cookie", "sc=; Path=/; Max-Age=0; SameSite=Strict");
+  server.send(200, "text/plain", "OK");
+}
+
+void drawPasswordScreen();
+// "Show on clock": puts the password on the panel for 60 s (once per 10 s).
+void handleReveal() {
+  if (!displayReady) { server.send(503, "text/plain", "The screen is not available"); return; }
+  if (revealAt && millis() - revealAt < 10000) { server.send(429, "text/plain", "Already shown"); return; }
+  revealAt = millis();
+  revealUntil = millis() + 60000;
+  drawPasswordScreen();
+  server.send(200, "text/plain", "OK");
+}
+
+void restartAP();
+void handlePasswordChange() {
+  if (!requireAuth()) return;
+  String p = server.arg("password");
+  if (!validPassword(p)) { server.send(400, "text/plain", "Use 8 to 31 characters, no spaces"); return; }
+  if (!storePassword(p)) { server.send(500, "text/plain", "Could not save the password"); return; }
+  devicePassword = p;
+  String keep = requestToken();   // other sessions end; this one stays signed in
+  for (String& s : sessions) if (!sameSecret(s, keep)) s = "";
+  server.send(200, "text/plain", "OK");
+  restartAP();   // the setup network now uses the new password
+}
+
 // ---------------------------- Web API (stock-compatible) --------------------
 String configJson() {
   JsonDocument doc;
@@ -215,7 +361,8 @@ String configJson() {
   doc["nightmode"] = cfg.nightMode; doc["starttime"] = cfg.startHour; doc["stoptime"] = cfg.stopHour;
   doc["nightbrightness"] = cfg.nightBrightness; doc["ntp"] = cfg.ntp;
   doc["timezone"] = cfg.timezoneMin; doc["tz"] = cfg.tz; doc["themeInterval"] = cfg.themeInterval;
-  doc["faces"] = cfg.faceMask;
+  doc["faces"] = cfg.faceMask; doc["nightauto"] = cfg.nightAuto;
+  doc["type"] = "smartclock-oss-settings"; doc["version"] = FW_VERSION;
   doc["color1"] = cfg.color1; doc["color2"] = cfg.color2; doc["color3"] = cfg.color3;
   // NOTE: stock leaked ssid/password/weatherkey here in cleartext. We deliberately
   // DO NOT expose secrets via /config. (See security notes in docs.) Weather comes
@@ -223,17 +370,17 @@ String configJson() {
   String out; serializeJson(doc, out); return out;
 }
 
-void handleApiSet() {
-  if (!storageReady || recoveryMode) { server.send(503, "text/plain", "Settings unavailable in recovery"); return; }
-  String key = server.arg("key");
-  String val = server.arg("value");
-  if      (key == "city")       { cfg.city = val; cfg.geoFor = ""; wxRefresh = true; }   // re-geocode
-  else if (key == "ntp")        cfg.ntp = val;
+// Applies one setting to cfg (not saved). Shared by /api/set and settings restore.
+// Returns "" on success, otherwise the reason ("Unknown Key" for unknown keys).
+bool timeChanged = false;
+String applySetting(const String& key, const String& val) {
+  if      (key == "city")       { if (val != cfg.city) { cfg.city = val; cfg.geoFor = ""; wxRefresh = true; } }   // re-geocode
+  else if (key == "ntp")        { cfg.ntp = val; timeChanged = true; }
   // Stock clients send a minute offset; honour it as a fixed offset (no DST rule).
-  else if (key == "timezone")   { cfg.timezoneMin = val.toInt(); cfg.tz = ""; }
+  else if (key == "timezone")   { cfg.timezoneMin = val.toInt(); cfg.tz = ""; timeChanged = true; }
   else if (key == "tz") {
-    if (val.length() > 63) { server.send(400, "text/plain", "TZ rule too long"); return; }
-    cfg.tz = val;
+    if (val.length() > 63) return F("TZ rule too long");
+    cfg.tz = val; timeChanged = true;
   }
   else if (key == "theme")      { cfg.theme = constrain(val.toInt(), 0, FACE_COUNT - 1); faceSince = millis(); }
   else if (key == "themeInterval") cfg.themeInterval = constrain(val.toInt(), 0, 3600);
@@ -249,15 +396,82 @@ void handleApiSet() {
   else if (key == "color3")     cfg.color3 = (uint16_t)val.toInt();
   else if (key == "faces")      cfg.faceMask = constrain(val.toInt(), 0, (1 << FACE_COUNT) - 1);
   else if (key == "mile")       cfg.mile = (val == "1" || val == "true");
-  else { server.send(200, "text/plain", "Unknown Key"); return; }
+  else if (key == "nightauto")  cfg.nightAuto = (val == "1" || val == "true");
+  else return F("Unknown Key");
+  return "";
+}
+
+// After settings change: apply time rules and redraw (colours, units, formats, faces).
+void settingsApplied() {
+  if (timeChanged) { applyTime(); timeChanged = false; }
+  brightnessDirty = true;   // the loop applies day or night brightness
+  if (mode != MODE_RUN) setBacklight(cfg.brightness);
+  faceInvalidate();
+}
+
+bool settingsWritable() {
+  if (storageReady && !recoveryMode) return true;
+  server.send(503, "text/plain", "Settings unavailable in recovery");
+  return false;
+}
+
+void handleApiSet() {
+  if (!requireAuth() || !settingsWritable()) return;
+  String err = applySetting(server.arg("key"), server.arg("value"));
+  if (err == "Unknown Key") { server.send(200, "text/plain", err); return; }   // stock reply
+  if (err.length()) { server.send(400, "text/plain", err); return; }
   if (!cfg.save()) { server.send(503, "text/plain", "Settings could not be saved"); return; }
-  if (key == "tz" || key == "timezone" || key == "ntp") applyTime();
-  faceInvalidate();   // colours, units, formats and faces all show on the panel
+  settingsApplied();
   server.send(200, "text/plain", "OK");
+}
+
+// ---- Backup, restore, reset (no WiFi details or password in a backup) ----
+void handleSettingsExport() {
+  if (!requireAuth() || !settingsWritable()) return;
+  server.sendHeader("Content-Disposition", "attachment; filename=\"smartclock-settings.json\"");
+  server.send(200, "application/json", configJson());
+}
+
+void handleSettingsImport() {
+  if (!requireAuth() || !settingsWritable()) return;
+  JsonDocument doc;
+  if (deserializeJson(doc, server.arg("plain")) || !doc.is<JsonObject>() || doc["type"] != "smartclock-oss-settings") {
+    server.send(400, "text/plain", "Not a SmartClock-OSS settings file");
+    return;
+  }
+  int applied = 0, skipped = 0;
+  for (JsonPair kv : doc.as<JsonObject>()) {
+    String key = kv.key().c_str();
+    if (key == "type" || key == "version" || key == "location") continue;
+    JsonVariant v = kv.value();
+    String val = v.is<bool>() ? String(v.as<bool>() ? "1" : "0") : v.as<String>();
+    if (applySetting(key, val).length()) skipped++; else applied++;
+  }
+  if (!cfg.save()) { server.send(503, "text/plain", "Settings could not be saved"); return; }
+  settingsApplied();
+  server.send(200, "text/plain", String(applied) + " settings restored" + (skipped ? ", " + String(skipped) + " skipped" : ""));
+}
+
+// Deletes /config.json (all settings and WiFi details); photos and the password stay.
+void handleSettingsReset() {
+  if (!requireAuth() || !settingsWritable()) return;
+  if (server.arg("confirm") != "reset") { server.send(400, "text/plain", "Confirmation missing"); return; }
+  LittleFS.remove("/config.json");
+  server.send(200, "text/plain", "Settings reset. Restarting...");
+  safeRestart();
+}
+
+void handleWifiForget() {
+  if (!requireAuth() || !settingsWritable()) return;
+  cfg.ssid = ""; cfg.password = "";
+  if (!cfg.save()) { server.send(503, "text/plain", "Settings could not be saved"); return; }
+  server.send(200, "text/plain", "WiFi forgotten. Restarting...");
+  safeRestart();
 }
 
 // Plain SSID list (stock shape); ?detail=1 adds signal strength and security.
 void handleScanWifi() {
+  if (!requireAuth()) return;
   bool detail = server.hasArg("detail");
   int n = WiFi.scanNetworks();
   JsonDocument doc; JsonArray a = doc.to<JsonArray>();
@@ -273,7 +487,7 @@ void handleScanWifi() {
 }
 
 void handleConnect() {
-  if (!storageReady || recoveryMode) { server.send(503, "text/plain", "Settings unavailable in recovery"); return; }
+  if (!requireAuth() || !settingsWritable()) return;
   cfg.ssid = server.arg("ssid");
   cfg.password = server.arg("password");
   if (!cfg.save()) { server.send(503, "text/plain", "WiFi settings could not be saved"); return; }
@@ -283,6 +497,7 @@ void handleConnect() {
 
 // Offered only after the existing volume failed to mount; erases the whole FS region.
 void handleFormatStorage() {
+  if (!requireAuth()) return;
   if (!storageMountFailed || server.arg("confirm") != "erase") {
     server.send(400, "text/plain", "Formatting is only available when storage failed to mount");
     return;
@@ -318,6 +533,7 @@ void handlePhotoUpload() {
   HTTPUpload& up = server.upload();
   if (up.status == UPLOAD_FILE_START) {
     photoError = "";
+    if (!requestAuthorized()) { photoError = "Sign in first"; return; }
     if (!storageReady || recoveryMode) { photoError = "Storage unavailable"; return; }
     String name = photoName(up.filename);
     if (name.isEmpty()) { photoError = "Only .jpg photos can be uploaded"; return; }
@@ -383,6 +599,7 @@ bool servePhoto() {
 }
 
 void handlePhotoDelete() {
+  if (!requireAuth()) return;
   if (!storageReady || recoveryMode) { server.send(503, "text/plain", "Storage unavailable"); return; }
   String name = server.arg("name");
   bool listed = false;
@@ -402,7 +619,6 @@ void sendIndex() {
   server.send_P(200, "text/html", reinterpret_cast<PGM_P>(INDEX_HTML_GZ), INDEX_HTML_GZ_LEN);
 }
 
-#define FW_VERSION "0.1.1"   // see CHANGELOG.md
 void handleVersion() { server.send(200, "text/plain", "SmartClock-OSS V" FW_VERSION); }
 
 // Firmware-only OTA. Stage bytes in free sketch space; never write U_FS.
@@ -423,6 +639,7 @@ void failOta(const char* message) {
 void handleOtaUpload() {
   HTTPUpload& up = server.upload();
   if (up.status == UPLOAD_FILE_START) {
+    if (!requestAuthorized()) { failOta("Sign in first"); return; }
     if (++otaFiles != 1 || otaFailed) { failOta("Upload exactly one firmware image"); return; }
     firmware.reset();
     otaError = "";
@@ -487,7 +704,7 @@ void setupRoutes() {
   server.on("/api/set",  handleApiSet);
   server.on("/scanwifi", handleScanWifi);
   server.on("/connect",  handleConnect);
-  server.on("/restart",  []{ server.send(200, "text/plain", "Restarting"); safeRestart(); });
+  server.on("/restart",  []{ if (!requireAuth()) return; server.send(200, "text/plain", "Restarting"); safeRestart(); });
   server.on("/version",  handleVersion);
   server.on("/update_ota", HTTP_POST, finishOta, handleOtaUpload);
   server.on("/format_storage", HTTP_POST, handleFormatStorage);
@@ -496,6 +713,15 @@ void setupRoutes() {
   server.on("/api/photos/upload", HTTP_POST, finishPhotoUpload, handlePhotoUpload);
   server.on("/api/photos/delete", HTTP_POST, handlePhotoDelete);
   server.on("/status",   handleStatus);
+  server.on("/api/auth/login", HTTP_POST, handleLogin);
+  server.on("/api/auth/logout", HTTP_POST, handleLogout);
+  server.on("/api/auth/reveal", HTTP_POST, handleReveal);
+  server.on("/api/auth/password", HTTP_POST, handlePasswordChange);
+  server.on("/api/settings/export", handleSettingsExport);
+  server.on("/api/settings/import", HTTP_POST, handleSettingsImport);
+  server.on("/api/settings/reset", HTTP_POST, handleSettingsReset);
+  server.on("/api/wifi/forget", HTTP_POST, handleWifiForget);
+  server.collectHeaders("Cookie");   // sessions are read from the cookie
   server.onNotFound([]{
     if (servePhoto()) return;
     if (mode == MODE_AP) { // captive portal: send everything to setup
@@ -503,7 +729,6 @@ void setupRoutes() {
       server.send(302, "text/plain", "");
     } else server.send(404, "text/plain", "Not found");
   });
-  // TODO: /theme/*, /photo/ upload+list+toggle endpoints.
 }
 
 // ---------------------------- WiFi ------------------------------------------
@@ -514,8 +739,14 @@ void startAP() {
   WiFi.mode(WIFI_AP_STA); // Keep recovery accessible even when the router disappears.
   WiFi.hostname(deviceHost());   // DHCP hostname: lets the router name the clock
   WiFi.softAPConfig(IPAddress(192,168,4,1), IPAddress(192,168,4,1), IPAddress(255,255,255,0));
-  WiFi.softAP("Smart Weather Clock");
+  restartAP();
   dns.start(53, "*", WiFi.softAPIP());
+}
+
+// WPA2 with the device password; open in recovery, so recovery is always reachable.
+void restartAP() {
+  if (recoveryMode) WiFi.softAP("Smart Weather Clock");
+  else WiFi.softAP("Smart Weather Clock", devicePassword.c_str());
 }
 
 // While the STA side searches for a missing router the ESP8266 hops channels and AP
@@ -547,10 +778,19 @@ void serviceSta() {
 
 void drawSetupScreen() {
   clockDisplay().fillScreen(TFT_BLACK);
-  centerText("Setup WiFi", 80, 4, TFT_WHITE);
-  centerText("Join WiFi:", 120, 2, TFT_WHITE);
-  centerText("Smart Weather Clock", 145, 2, TFT_CYAN);
-  centerText(WiFi.softAPIP().toString(), 180, 4, TFT_YELLOW);
+  centerText("Setup WiFi", 50, 4, TFT_WHITE);
+  centerText("Join WiFi:", 88, 2, TFT_WHITE);
+  centerText("Smart Weather Clock", 110, 2, TFT_CYAN);
+  centerText("Password:", 140, 2, TFT_WHITE);
+  centerText(devicePassword, 166, 4, TFT_YELLOW);
+  centerText("then open " + WiFi.softAPIP().toString(), 206, 2, TFT_WHITE);
+}
+
+void drawPasswordScreen() {
+  clockDisplay().fillScreen(TFT_BLACK);
+  centerText("Clock password", 80, 4, TFT_WHITE);
+  centerText(devicePassword, 125, 4, TFT_YELLOW);
+  centerText("Settings page and setup WiFi", 170, 2, TFT_CYAN);
 }
 
 void drawRecoveryScreen() {
@@ -558,9 +798,10 @@ void drawRecoveryScreen() {
   centerText("Recovery", 60, 4, TFT_ORANGE);
   centerText("Join WiFi:", 105, 2, TFT_WHITE);
   centerText("Smart Weather Clock", 130, 2, TFT_CYAN);
-  centerText(WiFi.softAPIP().toString(), 165, 4, TFT_YELLOW);
-  if (WiFi.status() == WL_CONNECTED) centerText(WiFi.localIP().toString(), 205, 2, TFT_GREEN);
-  if (storageMountFailed) centerText("Storage not mounted", 225, 2, TFT_RED);
+  centerText(WiFi.softAPIP().toString(), 160, 4, TFT_YELLOW);
+  centerText("Password: " + devicePassword, 190, 2, TFT_WHITE);
+  if (WiFi.status() == WL_CONNECTED) centerText(WiFi.localIP().toString(), 210, 2, TFT_GREEN);
+  if (storageMountFailed) centerText("Storage not mounted", 228, 2, TFT_RED);
 }
 
 void startOptionalServices() {
@@ -590,7 +831,7 @@ void handleStatus() {
   JsonDocument doc;
   doc["recovery"] = recoveryMode; doc["storageReady"] = storageReady;
   doc["storageMountFailed"] = storageMountFailed;
-  doc["version"] = FW_VERSION; doc["uptime"] = millis() / 1000; doc["heap"] = ESP.getFreeHeap();
+  doc["version"] = FW_VERSION; doc["build"] = FW_BUILD; doc["uptime"] = millis() / 1000; doc["heap"] = ESP.getFreeHeap();
   doc["heapLow"] = heapLow;   // (getMaxFreeBlockSize() would add 1.6 KB of umm stats)
   doc["resetReason"] = ESP.getResetReason();
   bool linked = WiFi.status() == WL_CONNECTED;
@@ -602,7 +843,11 @@ void handleStatus() {
   time_t now = time(nullptr);
   if (now > 1600000000) {            // only once NTP has set the clock
     struct tm t; localtime_r(&now, &t);
-    char buf[32]; strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %Z", &t);
+    // Not strftime(): it links 3.3 KB for this one string. _tzname holds the zone
+    // abbreviations of the POSIX TZ rule set by configTime().
+    char buf[40];
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d %s", t.tm_year + 1900, t.tm_mon + 1,
+             t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, _tzname[t.tm_isdst > 0 ? 1 : 0]);
     doc["time"] = buf;
   }
   if (wx.error.length()) doc["weatherError"] = wx.error;
@@ -616,6 +861,14 @@ void handleStatus() {
   doc["forecastDays"] = fc.valid ? fc.count : 0;
   doc["photos"] = storageReady ? photoCount() : 0;
   doc["face"] = cfg.theme;
+  doc["signedIn"] = requestAuthorized();
+  doc["nightAuto"] = cfg.nightAuto;
+  if (wx.sunrise >= 0 && wx.sunset >= 0) {
+    char sun[12];
+    unsigned rise = wx.sunrise % 1440, set = wx.sunset % 1440;
+    snprintf(sun, sizeof(sun), "%02u:%02u", rise / 60, rise % 60); doc["sunrise"] = sun;
+    snprintf(sun, sizeof(sun), "%02u:%02u", set / 60, set % 60); doc["sunset"] = sun;
+  }
   String out; serializeJson(doc, out);
   server.send(200, "application/json", out);
 }
@@ -631,6 +884,7 @@ void recoveryLoop() {
     markBoot(BOOT_CLEAN);
     recoveryLinkShown = WiFi.status() == WL_CONNECTED;
   }
+  if (revealUntil && (int32_t)(millis() - revealUntil) >= 0) { revealUntil = 0; if (displayReady) drawRecoveryScreen(); }
   if (displayReady && recoveryLinkShown != (WiFi.status() == WL_CONNECTED)) {
     recoveryLinkShown = !recoveryLinkShown;
     drawRecoveryScreen();
@@ -658,7 +912,7 @@ void serviceMdns() {
 
 // ---------------------------- setup / loop ----------------------------------
 void setup() {
-  Serial.begin(115200);
+  // No Serial.begin(): nothing is printed, and leaving it out drops the UART driver.
   BootMarker marker{};
   BootState previous = BOOT_CLEAN;
   if (ESP.rtcUserMemoryRead(32, reinterpret_cast<uint32_t*>(&marker), sizeof(marker)) &&
@@ -676,6 +930,7 @@ void setup() {
   else clearPowerCycles();
   recoveryMode = powerCycled || previous != BOOT_CLEAN;
   recoveryDisplay = previous != BOOT_RECOVERY_DISPLAY;
+  loadPassword();   // before startAP(): it is the setup network's WPA2 key
   startAP();
   setupRoutes();
   server.begin();
@@ -719,6 +974,9 @@ void loop() {
     mode = MODE_AP;
     drawSetupScreen();
     faceInvalidate();
+  } else if (mode == MODE_AP && revealUntil && (int32_t)(millis() - revealUntil) >= 0) {
+    revealUntil = 0;
+    drawSetupScreen();   // back from "Show on clock" while not connected
   }
 
   static uint32_t lastButton = 0;
@@ -739,11 +997,13 @@ void loop() {
     struct tm t; localtime_r(&now, &t);
 
     static int lastBrightMin = -1;     // apply night dimming once per minute
-    if (timeValid && t.tm_min != lastBrightMin) {
+    if (timeValid && (t.tm_min != lastBrightMin || brightnessDirty)) {
+      brightnessDirty = false;
       lastBrightMin = t.tm_min;
       setBacklight(isNight(t) ? cfg.nightBrightness : cfg.brightness);
     }
-    if ((int32_t)(millis() - faceHoldUntil) >= 0) faceDraw(cfg.theme, t, timeValid);
+    if (revealUntil && (int32_t)(millis() - revealUntil) >= 0) { revealUntil = 0; faceInvalidate(); }
+    if (!revealUntil && (int32_t)(millis() - faceHoldUntil) >= 0) faceDraw(cfg.theme, t, timeValid);
   }
   delay(20);   // faces redraw only what changed, so a short tick is cheap
 }

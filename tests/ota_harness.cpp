@@ -50,6 +50,8 @@ struct MockUpdate {
 void delay(unsigned) {}
 void yield() {}
 void safeRestart() { ESP.restart(); }
+bool authOk = true;   // what requestAuthorized() answers for the request
+bool requestAuthorized() { return authOk; }
 
 // Simulated EEPROM sector: persists across "boots", counts real flash commits.
 constexpr size_t SPI_FLASH_SEC_SIZE = 4096;
@@ -117,6 +119,9 @@ int main(int argc, char** argv) {
   reset(); upload(image); event(UPLOAD_FILE_ABORTED);
   assert(!Update.running && !Update.committed && ESP.restarts == 0);
   upload(image); finishOta(); assert(Update.committed && ESP.restarts == 1);
+  // Not signed in: rejected at the first chunk, nothing is staged.
+  reset(); authOk = false; upload(image); assert(!Update.running && Update.staged.empty()); rejected();
+  assert(server.message == "Sign in first"); authOk = true;
   reset(); Update.failBegin = true; upload(image); rejected();
   reset(); Update.failWrite = true; upload(image); rejected();
   reset(); Update.failEnd = true; upload(image); rejected();

@@ -5,13 +5,21 @@ Date: 2026-10-05
 Status: Open; not scheduled.
 
 Every item has to fit the OTA size budget: 0x7E000 bytes. With all seven faces
-and Open-Meteo the image is at 96% (about 19 KB left). Measure each addition
-before it lands.
+and Open-Meteo the image was at 96%; 0.1.2 freed 34 KB and is at 92% (about
+43 KB left). Measure each addition before it lands. mDNS (19.9 KB) is the next
+thing to drop if space runs out.
 
 ## Security
 
-- Authentication for mutating endpoints and/or a WPA2 AP password
-  ([issue](../issues/2026-10-05-ap-and-ota-unauthenticated.md)).
+- Done in 0.1.2: device password for the setup network and settings page.
+
+## Next candidates
+
+- A way back to stock over WiFi: accept a stock image whose SHA-256 matches a
+  known vendor release (V1.0.4 / V1.0.6).
+- GitHub Actions: build, test and publish release images from the public source.
+- Crash reports: keep the last exception's cause and address across the reboot
+  and show them on the System card.
 
 ## Themes and display
 

@@ -26,6 +26,7 @@ struct Config {
   int    faceMask    = 0x7f;         // bit n set = face n takes part in rotation
   int    brightness  = 60;           // 0..100
   bool   nightMode   = true;
+  bool   nightAuto   = false;          // dim from sunset to sunrise instead of fixed hours
   int    nightBrightness = 15;       // 0..100
   int    startHour   = 23;           // night start
   int    stopHour    = 7;            // night end
@@ -60,6 +61,7 @@ struct Config {
     faceMask    = doc["faces"]       | faceMask;
     brightness  = doc["brightness"]  | brightness;
     nightMode   = doc["nightmode"]   | nightMode;
+    nightAuto   = doc["nightauto"]   | nightAuto;
     nightBrightness = doc["nightbrightness"] | nightBrightness;
     startHour   = doc["starttime"]   | startHour;
     stopHour    = doc["stoptime"]    | stopHour;
@@ -82,7 +84,7 @@ struct Config {
     doc["theme"] = theme;         doc["themeInterval"] = themeInterval;
     doc["faces"] = faceMask;
     doc["brightness"] = brightness;
-    doc["nightmode"] = nightMode; doc["nightbrightness"] = nightBrightness;
+    doc["nightmode"] = nightMode; doc["nightauto"] = nightAuto; doc["nightbrightness"] = nightBrightness;
     doc["starttime"] = startHour; doc["stoptime"] = stopHour;
     doc["color1"] = color1;       doc["color2"] = color2;   doc["color3"] = color3;
     File f = LittleFS.open("/config.json", "w");
