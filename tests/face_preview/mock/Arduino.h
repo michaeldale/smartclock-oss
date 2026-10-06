@@ -44,6 +44,7 @@ class String {
   String& operator+=(const String& o) { s += o.s; return *this; }
   String& operator+=(char c) { s += c; return *this; }
   bool operator==(const String& o) const { return s == o.s; }
+  bool operator!=(const String& o) const { return s != o.s; }
   friend String operator+(const String& a, const String& b) { return String(a.s + b.s); }
   friend String operator+(const String& a, const char* b) { return String(a.s + b); }
   friend String operator+(const char* a, const String& b) { return String(std::string(a) + b.s); }

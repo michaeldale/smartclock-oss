@@ -13,6 +13,8 @@ class File {
   explicit File(FILE* h) : f(h) {}
   explicit operator bool() const { return f != nullptr; }
   size_t read(uint8_t* buf, size_t n) { return f ? fread(buf, 1, n, f) : 0; }
+  int read() { int c = f ? fgetc(f) : EOF; return c == EOF ? -1 : c; }   // ArduinoJson reader
+  size_t readBytes(char* buf, size_t n) { return f ? fread(buf, 1, n, f) : 0; }
   bool seek(long n, SeekMode m) { return f && fseek(f, n, m == SeekSet ? SEEK_SET : m == SeekCur ? SEEK_CUR : SEEK_END) == 0; }
   void close() { if (f) fclose(f); f = nullptr; }
 };
@@ -29,10 +31,13 @@ class Dir {
 };
 
 struct LittleFSClass {
-  static std::string root() { const char* d = getenv("PHOTO_DIR"); return d ? d : ""; }
-  static std::string host(const String& p) {
+  static std::string env(const char* name) { const char* d = getenv(name); return d ? d : ""; }
+  static std::string root() { return env("PHOTO_DIR"); }
+  static std::string host(const String& p) {   // /photo -> $PHOTO_DIR, /faces -> $FACES_DIR
     std::string s = p.c_str();
-    return s.rfind("/photo", 0) == 0 && !root().empty() ? root() + s.substr(6) : std::string();
+    if (s.rfind("/photo", 0) == 0 && !root().empty()) return root() + s.substr(6);
+    if (s.rfind("/faces", 0) == 0 && !env("FACES_DIR").empty()) return env("FACES_DIR") + s.substr(6);
+    return std::string();
   }
   File open(const String& path, const char*) { std::string h = host(path); return File(h.empty() ? nullptr : fopen(h.c_str(), "rb")); }
   Dir openDir(const char* path) {

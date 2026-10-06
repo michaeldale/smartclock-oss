@@ -75,6 +75,13 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .ph{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--surface2)}
 .ph img{width:100%;height:100%;object-fit:cover;display:block}
 .ph button{position:absolute;top:4px;right:4px;width:24px;height:24px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:14px;line-height:24px;cursor:pointer;padding:0}
+.ph.off img{opacity:.35}
+.ph .eye{position:absolute;left:4px;top:4px;width:24px;height:24px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:12px;cursor:pointer;padding:0}
+textarea{width:100%;min-height:180px;font:12.5px/1.45 ui-monospace,Consolas,monospace;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px;resize:vertical}
+code.key{font:12.5px ui-monospace,Consolas,monospace;background:var(--surface2);padding:3px 6px;border-radius:6px;word-break:break-all}
+.integ{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
+.integ:first-of-type{border-top:0;margin-top:0;padding-top:0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
 .ph .tag{position:absolute;left:4px;bottom:4px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:6px}
 .ph.busy{display:grid;place-items:center;color:var(--muted);font-size:12px}
 .meter{height:6px;border-radius:99px;background:var(--surface2);overflow:hidden;margin-top:10px}
@@ -250,7 +257,53 @@ a{color:var(--accent)}
     <input type="file" id="phFile" accept="image/*" multiple hidden>
     <div class="photos" id="phList"></div>
     <div class="meter"><i id="phMeter" style="width:0"></i></div>
-    <p class="note" id="phNote">The Photo face shows a new photo every minute.</p>
+    <div class="row" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px"><span class="lbl">Change photo every</span>
+      <select class="sm" id="photointerval" data-key="photointerval">
+        <option value="10">10 s</option><option value="30">30 s</option><option value="60">1 min</option>
+        <option value="300">5 min</option><option value="900">15 min</option></select></div>
+    <p class="note" id="phNote">Tap the eye to leave a photo out of the slideshow.</p>
+  </section>
+
+  <section class="card settings wide">
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h10M4 17h6M14 17h6M18 7h2M14 4v6M10 14v6"/></svg>Integrations</h2>
+    <p class="note" style="margin-top:0">All off unless you turn them on. Details and examples:
+      <a href="https://github.com/michaeldale/smartclock-oss/blob/main/docs/specifications/integrations-api.md" target="_blank" rel="noopener">integrations API</a>.</p>
+
+    <div class="integ">
+      <div class="row"><label for="facesapi">Custom faces<span class="hint">Design faces as JSON and send them over HTTP or MQTT, with live values like {time} and {temp}</span></label>
+        <label class="switch"><input type="checkbox" id="facesapi" data-key="facesapi"><span></span></label></div>
+      <div id="facesBox" hidden>
+        <div class="row"><span class="lbl">API key<span class="hint">Send as the X-Api-Key header (or ?key=) from scripts</span></span>
+          <button class="btn" onclick="newKey()">New key</button></div>
+        <code class="key" id="apiKey">No key yet; press New key</code>
+        <div class="sub">Your faces</div>
+        <div class="chips" id="faceList"></div>
+        <div class="grid2"><div class="field"><label for="faceName">Name</label><input type="text" id="faceName" placeholder="e.g. power" spellcheck="false"></div>
+          <div class="field"><label>&nbsp;</label><button class="btn" onclick="faceExample()">Insert example</button></div></div>
+        <div class="field"><label for="faceJson">Face JSON</label><textarea id="faceJson" spellcheck="false"></textarea></div>
+        <div class="btns"><button class="btn primary" onclick="saveFace(true)">Save &amp; show</button><button class="btn" onclick="saveFace(false)">Save</button></div>
+      </div>
+    </div>
+
+    <div class="integ">
+      <div class="row"><label for="hacompat">Home Assistant dashboards<span class="hint">For the geekmagic-hacs integration, which pushes rendered dashboards as photos</span></label>
+        <label class="switch"><input type="checkbox" id="hacompat" data-key="hacompat"><span></span></label></div>
+      <p class="note" id="haNote" hidden>That integration cannot sign in, so while this is on anyone on your network can manage photos, choose the face and set the brightness without the password. WiFi, the password and firmware stay protected. Add the clock in Home Assistant by its address.</p>
+    </div>
+
+    <div class="integ">
+      <div class="row"><label for="mqtt">MQTT<span class="hint">Home Assistant discovery: backlight, face, weather sensors; custom faces on topics too</span></label>
+        <label class="switch"><input type="checkbox" id="mqtt" data-key="mqtt"><span></span></label></div>
+      <div id="mqttBox" hidden>
+        <div class="grid2"><div class="field"><label for="mqtthost">Broker</label><input type="text" id="mqtthost" placeholder="homeassistant.local" spellcheck="false"></div>
+          <div class="field"><label for="mqttport">Port</label><input type="text" id="mqttport" inputmode="numeric" placeholder="1883"></div>
+          <div class="field"><label for="mqttuser">Username</label><input type="text" id="mqttuser" autocomplete="off" spellcheck="false"></div>
+          <div class="field"><label for="mqttpass">Password</label><input type="password" id="mqttpass" autocomplete="new-password"></div></div>
+        <div class="field"><label for="mqttbase">Topic</label><input type="text" id="mqttbase" spellcheck="false"></div>
+        <div class="btns"><button class="btn primary" onclick="saveMqtt()">Save &amp; connect</button></div>
+        <p class="note" id="mqttStatus">—</p>
+      </div>
+    </div>
   </section>
 
   <section class="card">
@@ -267,6 +320,7 @@ a{color:var(--accent)}
     <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z"/></svg>System</h2>
     <dl>
       <dt>Firmware</dt><dd id="sVer">—</dd>
+      <dt>Project</dt><dd><a href="https://github.com/michaeldale/smartclock-oss" target="_blank" rel="noopener">github.com/michaeldale/smartclock-oss</a></dd>
       <dt>LAN address</dt><dd id="sIp">—</dd>
       <dt>Hostname</dt><dd id="sHost">—</dd>
       <dt>Setup network</dt><dd id="sAp">Smart Weather Clock</dd>
@@ -403,9 +457,11 @@ function renderThemes(){
 
 function fillConfig(c){
   cfg=c;renderThemes();
-  for(const k of ['themeInterval','brightness','nightbrightness','starttime','stoptime','ntp','city']){const el=$(k);if(el&&c[k]!==undefined){el.value=c[k];el.show&&el.show()}}
+  for(const k of ['themeInterval','brightness','nightbrightness','starttime','stoptime','ntp','city','photointerval']){const el=$(k);if(el&&c[k]!==undefined){el.value=c[k];el.show&&el.show()}}
   if(![...$('themeInterval').options].some(o=>o.value==String(c.themeInterval))){const o=new Option(c.themeInterval+' s',c.themeInterval);$('themeInterval').add(o);$('themeInterval').value=c.themeInterval}
   $('nightmode').checked=!!c.nightmode;
+  ['facesapi','hacompat','mqtt'].forEach(k=>$(k).checked=!!c[k]);
+  ['mqtthost','mqttuser','mqttbase'].forEach(k=>$(k).value=c[k]||'');$('mqttport').value=c.mqttport||1883;
   ['color1','color2','color3'].forEach(k=>$(k).value=hex565(c[k]||0));
   paintSeg(document.querySelector('[data-key=hour12]'),c.hour12?1:0);
   paintSeg(document.querySelector('[data-key=celsius]'),c.celsius?1:0);
@@ -507,19 +563,53 @@ drop.onclick=()=>$('fw').click();$('fw').onchange=e=>pickFw(e.target.files[0]);
 drop.ondragover=e=>{e.preventDefault();drop.classList.add('over')};drop.ondragleave=()=>drop.classList.remove('over');
 drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');pickFw(e.dataTransfer.files[0])};
 
+// ---- Integrations
+function integRows(){$('facesBox').hidden=!$('facesapi').checked;$('haNote').hidden=!$('hacompat').checked;$('mqttBox').hidden=!$('mqtt').checked}
+async function loadInteg(){integRows();
+  try{const d=JSON.parse(await req('/api/integrations'));$('apiKey').textContent=d.apiKey||'No key yet; press New key';
+    $('mqttStatus').textContent='Status: '+d.mqttStatus;$('mqttbase').placeholder=d.mqttTopic;$('mqttpass').placeholder=d.mqttPassSet?'Saved; type to replace':'';
+    if($('facesapi').checked)loadFaces()}catch(e){}}
+async function newKey(){if($('apiKey').textContent.length>20&&!confirm('Replace the API key? Scripts using the old one stop working.'))return;
+  try{await req('/api/integrations',form({action:'newkey'}));loadInteg();toast('New API key')}catch(e){toast(e.message,1)}}
+async function loadFaces(){try{const d=JSON.parse(await req('/api/faces')),box=$('faceList');box.innerHTML='';
+  if(!d.faces.length)box.innerHTML='<span class="note">None yet. Try Insert example, then Save &amp; show.</span>';
+  d.faces.forEach(n=>{const c=document.createElement('span');c.className='chip'+(d.showing===n?' on':'');c.textContent=n+' ';
+    const mk=(t,fn)=>{const b=document.createElement('button');b.className='linkbtn';b.style.marginLeft='6px';b.textContent=t;b.onclick=fn;c.appendChild(b)};
+    mk('show',async()=>{try{await req('/api/faces/show',form({name:n}));loadFaces()}catch(e){toast(e.message,1)}});
+    mk('edit',async()=>{try{$('faceName').value=n;$('faceJson').value=JSON.stringify(JSON.parse(await req('/api/faces/get?name='+n)),null,1)}catch(e){toast(e.message,1)}});
+    mk('delete',async()=>{if(!confirm('Delete face '+n+'?'))return;try{await req('/api/faces/delete',form({name:n}));loadFaces()}catch(e){toast(e.message,1)}});
+    box.appendChild(c)})}catch(e){}}
+function faceExample(){$('faceName').value=$('faceName').value||'example';$('faceJson').value=JSON.stringify({bg:'#000000',items:[
+  {type:'text',x:120,y:24,text:'{dow} {day} {mon3}',font:2,color:'#9aa0a6',align:'mc',bg:'#000000',pad:200},
+  {type:'text',x:120,y:78,text:'{time}',font:6,color:'#ffa826',align:'mc',bg:'#000000',pad:220},
+  {type:'ring',x:60,y:170,r:44,w:8,value:'{hum}',max:100,color:'#6ab7ff'},
+  {type:'text',x:60,y:170,text:'{hum}%',font:4,color:'#ffffff',align:'mc',bg:'#000000',pad:60},
+  {type:'icon',x:180,y:155,size:56,icon:'{icon}',bg:'#000000'},
+  {type:'text',x:180,y:205,text:'{temp} {unit}',font:4,color:'#4cd9a0',align:'mc',bg:'#000000',pad:90}]},null,1)}
+async function saveFace(show){const n=$('faceName').value.trim().toLowerCase();let body;
+  if(!/^[a-z0-9_-]{1,20}$/.test(n)){toast('Name: 1-20 of a-z 0-9 _ -',1);return}
+  try{body=JSON.stringify(JSON.parse($('faceJson').value))}catch(e){toast('The JSON is not valid: '+e.message,1);return}
+  try{await req('/api/faces?name='+n+(show?'&show=1':''),{method:'POST',headers:{'Content-Type':'application/json'},body});toast(show?'Saved and showing':'Saved');loadFaces()}catch(e){toast(e.message,1)}}
+async function saveMqtt(){const keys=['mqtthost','mqttport','mqttuser','mqttbase'];
+  for(const k of keys)if(!await set(k,$(k).value.trim()))return;
+  if($('mqttpass').value&&!await set('mqttpass',$('mqttpass').value))return;$('mqttpass').value='';
+  setTimeout(loadInteg,3000)}
+['facesapi','hacompat','mqtt'].forEach(id=>$(id).addEventListener('change',()=>setTimeout(loadInteg,300)));
+
 // ---- Photos: crop to 240x240 and encode as a baseline JPEG in the browser
 async function loadPhotos(){
   try{const d=await(await fetch('/api/photos')).json(),list=$('phList');
     list.innerHTML=d.files.length?'':'<p class="note" style="grid-column:1/-1;margin:0">No photos yet.</p>';
     d.files.forEach(f=>{const el=document.createElement('div');el.className='ph';
-      const shown=/\.jpe?g$/i.test(f.name);
-      el.innerHTML='<img loading="lazy" alt=""><button title="Delete">×</button>'+(shown?'':'<span class="tag">Not shown</span>');
+      const shown=/\.jpe?g$/i.test(f.name);if(f.enabled===false)el.classList.add('off');
+      el.innerHTML='<img alt=""><button title="Delete">×</button>'+(shown?'<button class="eye" title="In slideshow">'+(f.enabled===false?'–':'●')+'</button>':'<span class="tag">Not shown</span>');
+      const eye=el.querySelector('.eye');if(eye)eye.onclick=async()=>{try{await req('/photo/toggle?name='+encodeURIComponent(f.name)+'&state='+(f.enabled===false?1:0));loadPhotos()}catch(e){toast(e.message,1)}};
       el.querySelector('img').src='/photo/'+encodeURIComponent(f.name);
-      el.querySelector('button').onclick=async()=>{if(!confirm('Delete this photo?'))return;
+      el.querySelector('button[title=Delete]').onclick=async()=>{if(!confirm('Delete this photo?'))return;
         try{await req('/api/photos/delete',form({name:f.name}));loadPhotos()}catch(e){toast(e.message,1)}};
       list.appendChild(el)});
     if(d.total){const pct=Math.round(d.used/d.total*100);$('phMeter').style.width=pct+'%';
-      $('phNote').textContent=`${d.files.length} photo${d.files.length==1?'':'s'} · storage ${pct}% used (${(d.used/1048576).toFixed(1)} of ${(d.total/1048576).toFixed(1)} MB). The Photo face shows a new one every minute.`}
+      $('phNote').textContent=`${d.files.length} photo${d.files.length==1?'':'s'} · storage ${pct}% used (${(d.used/1048576).toFixed(1)} of ${(d.total/1048576).toFixed(1)} MB). Tap the eye to leave a photo out of the slideshow.`}
   }catch(e){}}
 function cropTo240(file){return new Promise((ok,bad)=>{const img=new Image(),url=URL.createObjectURL(file);
   img.onload=()=>{const c=document.createElement('canvas');c.width=c.height=240;const s=Math.min(img.naturalWidth,img.naturalHeight);
@@ -546,7 +636,7 @@ phDrop.ondrop=e=>{e.preventDefault();phDrop.classList.remove('over');addPhotos([
 
 all('select.hours').forEach(s=>{for(let h=0;h<24;h++)s.add(new Option((h%12||12)+(h<12?' am':' pm'),h))});
 bindInputs();renderThemes();
-(async()=>{try{fillConfig(await(await fetch('/config')).json())}catch(e){toast('Could not load settings',1)}await poll();loadPhotos();setInterval(poll,5000)})();
+(async()=>{try{fillConfig(await(await fetch('/config')).json())}catch(e){toast('Could not load settings',1)}await poll();loadPhotos();loadInteg();setInterval(poll,5000)})();
 </script>
 </body>
 </html>

@@ -14,6 +14,8 @@ A decision record is a dated finding or choice, with the evidence that produced 
 
 ## Display
 
+- [2026-10-06 Optional integrations: custom faces, geekmagic-hacs, MQTT](2026-10-06-integrations.md)
+
 - [2026-10-05 Seven clock faces without a framebuffer](2026-10-05-clock-faces-without-a-framebuffer.md)
 
 ## Recovery

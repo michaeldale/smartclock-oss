@@ -26,8 +26,26 @@ are needed.
 - **Hard to brick:** firmware updates are checked before anything is written, the setup
   network is always on, and there is a recovery mode reached by power cycling. See
   [Recovery](#recovery).
+- **Integrations (optional, off by default):** design your own faces as JSON with live
+  values, show Home Assistant dashboards via
+  [geekmagic-hacs](https://github.com/adrienbrault/geekmagic-hacs), and connect to
+  Home Assistant over MQTT. See [docs/specifications/integrations-api.md](docs/specifications/integrations-api.md).
 - **Private:** no cloud account, no tracking, and WiFi passwords are never exposed by the
   web API (the stock firmware returned them in plain text).
+
+## Settings page
+
+Everything is set from a web page on the clock: faces, colours, night mode, time zone,
+weather, WiFi, photos, integrations and firmware updates. It works on a phone, follows
+your light or dark mode, and needs no internet connection on the setup network.
+
+![Settings page: overview, faces and night mode](docs/images/settings-overview.png)
+
+| On a phone | System: password, backup and reset |
+|---|---|
+| ![Settings page on a phone, dark mode](docs/images/settings-phone.png) | ![System card](docs/images/settings-system.png) |
+
+![Integrations: custom faces, Home Assistant dashboards and MQTT](docs/images/settings-integrations.png)
 
 ## Supported devices
 

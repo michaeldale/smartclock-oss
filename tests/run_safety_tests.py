@@ -82,13 +82,35 @@ for f in list((root / "src").glob("*.cpp")) + list((root / "src").glob("*.h")):
     assert not re.search(r'"[^"\n]*%[-+ #0-9.]*[eEfgG][^"\n]*"', code), f"float printf format in {f.name}"
     assert "scanf" not in code and "toFloat" not in code, f"float parsing in {f.name}"
 # Every handler that changes the clock checks the sign-in first.
-for name in ("handleApiSet", "handleConnect", "handleFormatStorage", "handlePhotoDelete", "handleWeatherSync",
+def function(src, name):
+    body = src[src.index(name):]
+    return body[:body.index("\n}\n")]
+
+
+for name in ("handleApiSet", "handleConnect", "handleFormatStorage", "handleWeatherSync",
              "handlePasswordChange", "handleSettingsExport", "handleSettingsImport", "handleSettingsReset",
              "handleWifiForget", "handleScanWifi"):
-    body = source[source.index("void " + name + "()"):]
-    body = body[:body.index("\n}\n")]
-    assert "requireAuth()" in body, f"{name} does not require sign-in"
+    assert "requireAuth()" in function(source, "void " + name + "()"), f"{name} does not require sign-in"
 assert "if (!requestAuthorized()) { failOta(" in handler, "OTA upload must require sign-in"
-assert "if (!requestAuthorized()) { photoError" in source, "photo upload must require sign-in"
-print("PASS: stock-matching 4m3m layout, OTA size budget, no float printf, sign-in guards, non-formatting mount,")
-print("      early recovery server, power-cycle/crash recovery (no button), safe restarts, STA backoff, persistent AP")
+# Photos: signed in, or the stock-compatible /photo/* API while "Home Assistant dashboards" is on.
+access = function(source, "bool photoAccess()")
+assert "requestAuthorized()" in access and "cfg.haCompat" in access and '"/photo/"' in access
+assert "if (!photoAccess()) { photoError" in source, "photo upload must check photoAccess()"
+assert "if (!photoAccess())" in function(source, "void handlePhotoDelete()"), "photo delete must check photoAccess()"
+# /api/set without sign-in: only face and brightness, only with the integration on.
+api_set = function(source, "void handleApiSet()")
+assert 'cfg.haCompat && (key == "theme" || key == "lcd_brightness" || key == "brightness")' in api_set
+# Integrations: each is off by default and every endpoint checks its own switch.
+integ = (root / "src" / "integrations.cpp").read_text(encoding="utf-8")
+config = (root / "src" / "config.h").read_text(encoding="utf-8")
+for flag in ("facesApi = false", "haCompat = false", "mqttOn   = false"):
+    assert flag in config, f"integration not off by default: {flag}"
+assert "cfg.facesApi" in function(integ, "bool facesAllowed()") and "apiKeyOk()" in function(integ, "bool facesAllowed()")
+assert "cfg.haCompat" in function(integ, "bool compatAllowed()")
+for name in ("handleFaces", "handleFaceGet", "handleFaceDelete", "handleFaceShow", "handleFaceVars"):
+    assert "facesAllowed()" in function(integ, "void " + name + "()"), f"{name} must check facesAllowed()"
+for name in ("handleThemeList", "handleThemeToggle", "handleThemeInterval", "handlePhotoToggle", "handlePhotoInterval"):
+    assert "compatAllowed()" in function(integ, "void " + name + "()"), f"{name} must check compatAllowed()"
+assert "requireAuth()" in function(integ, "void handleIntegrations()"), "the API key is only shown when signed in"
+print("PASS: stock-matching 4m3m layout, OTA size budget, no float printf, sign-in and integration guards,")
+print("      non-formatting mount, early recovery server, power-cycle/crash recovery, safe restarts, STA backoff, persistent AP")

@@ -33,6 +33,17 @@ struct Config {
   uint16_t color1 = 0xFD44;          // RGB565 accents: time and hands (amber #FFA826)
   uint16_t color2 = 0x6DBF;          // date and highlights (soft blue #6AB7FF)
   uint16_t color3 = 0x4ED4;          // weather (mint #4CD9A0)
+  // Photos: seconds per photo, and names left out of the slideshow ("|a.jpg|b.jpg|").
+  int    photoInterval = 60;
+  String photoOff;
+  String customFace;                 // the custom face shown when theme is FACE_CUSTOM
+  // Integrations, all off by default (settings page, Integrations card).
+  bool   facesApi = false;           // custom faces over HTTP (and MQTT when that is on)
+  bool   haCompat = false;           // stock SD Pro photo API for geekmagic-hacs; no sign-in
+  bool   mqttOn   = false;           // MQTT with Home Assistant discovery
+  String mqttHost, mqttUser, mqttPass, mqttBase;   // mqttBase "" = the hostname
+  int    mqttPort = 1883;
+  String apiKey;                     // for scripts calling the faces API; never exported
 
   bool load() {
     if (!LittleFS.exists("/config.json")) return false;
@@ -68,6 +79,18 @@ struct Config {
     color1      = doc["color1"]      | color1;
     color2      = doc["color2"]      | color2;
     color3      = doc["color3"]      | color3;
+    photoInterval = doc["photointerval"] | photoInterval;
+    photoOff    = doc["photooff"]    | photoOff;
+    customFace  = doc["customface"]  | customFace;
+    facesApi    = doc["facesapi"]    | facesApi;
+    haCompat    = doc["hacompat"]    | haCompat;
+    mqttOn      = doc["mqtt"]        | mqttOn;
+    mqttHost    = doc["mqtthost"]    | mqttHost;
+    mqttPort    = doc["mqttport"]    | mqttPort;
+    mqttUser    = doc["mqttuser"]    | mqttUser;
+    mqttPass    = doc["mqttpass"]    | mqttPass;
+    mqttBase    = doc["mqttbase"]    | mqttBase;
+    apiKey      = doc["apikey"]      | apiKey;
     return true;
   }
 
@@ -87,6 +110,10 @@ struct Config {
     doc["nightmode"] = nightMode; doc["nightauto"] = nightAuto; doc["nightbrightness"] = nightBrightness;
     doc["starttime"] = startHour; doc["stoptime"] = stopHour;
     doc["color1"] = color1;       doc["color2"] = color2;   doc["color3"] = color3;
+    doc["photointerval"] = photoInterval; doc["photooff"] = photoOff; doc["customface"] = customFace;
+    doc["facesapi"] = facesApi;   doc["hacompat"] = haCompat; doc["mqtt"] = mqttOn;
+    doc["mqtthost"] = mqttHost;   doc["mqttport"] = mqttPort; doc["mqttuser"] = mqttUser;
+    doc["mqttpass"] = mqttPass;   doc["mqttbase"] = mqttBase; doc["apikey"] = apiKey;
     File f = LittleFS.open("/config.json", "w");
     if (!f) return false;
     serializeJson(doc, f);

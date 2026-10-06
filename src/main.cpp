@@ -23,10 +23,12 @@
 #include "firmware_validation.h"
 #include "weather.h"
 #include "faces.h"
+#include "integrations.h"
 
 
-#define FW_VERSION "0.1.2"   // see CHANGELOG.md
+#define FW_VERSION "1.2.0"   // see CHANGELOG.md
 #include "build_info.h"   // FW_BUILD: commit, "+" if uncommitted changes, build time
+const char* firmwareVersion() { return FW_VERSION; }
 
 // ----------------------------------------------------------------------------
 // Construct the driver only during optional startup: even its constructor touches GPIO.
@@ -159,6 +161,7 @@ constexpr uint32_t MDNS_MIN_HEAP = 28000, WEATHER_MIN_HEAP = 16000;
 uint32_t heapLow = UINT32_MAX;   // lowest free heap seen, for /status
 uint32_t faceHoldUntil = 0;   // keep a status screen (e.g. the IP) up until then
 bool brightnessDirty = false;  // settings changed: re-evaluate night dimming now
+bool backlightOff = false;     // switched off over MQTT (not saved)
 
 volatile bool buttonPressed = false;
 IRAM_ATTR void onButton() { buttonPressed = true; }
@@ -204,15 +207,23 @@ void centerText(const String& s, int y, uint8_t font, uint16_t color) {
 // ---------------------------- Faces and weather schedule --------------------
 uint32_t faceSince = 0;   // when the current face was chosen (rotation timer)
 
-// The next face in id order that is enabled for rotation (when asked) and has
-// something to show; the current face if there is none.
-int nextFace(int current, bool rotation) {
-  for (int step = 1; step <= FACE_COUNT; ++step) {
-    int f = (current + step) % FACE_COUNT;
-    if (rotation && !(cfg.faceMask >> f & 1)) continue;
-    if (faceAvailable(f)) return f;
+// Moves to the next face: built-in faces by id (enabled for rotation, when rotating,
+// and with something to show), then custom faces by name when that integration is on.
+void advanceFace(bool rotation) {
+  int customs = cfg.facesApi ? customFaceCount() : 0, n = FACE_COUNT + customs;
+  int cur = cfg.theme < FACE_COUNT ? cfg.theme : FACE_COUNT - 1;
+  if (cfg.theme == FACE_CUSTOM)
+    for (int i = 0; i < customs; ++i) if (customFaceAt(i) == cfg.customFace) cur = FACE_COUNT + i;
+  for (int step = 1; step <= n; ++step) {
+    int pos = (cur + step) % n;
+    if (pos >= FACE_COUNT) {
+      String name = customFaceAt(pos - FACE_COUNT);
+      if (name.length()) { cfg.theme = FACE_CUSTOM; cfg.customFace = name; return; }
+      continue;
+    }
+    if (rotation && !(cfg.faceMask >> pos & 1)) continue;
+    if (faceAvailable(pos)) { cfg.theme = pos; return; }
   }
-  return current;
 }
 
 // One Open-Meteo request every 15 min (its current data is 15-minute) fills both
@@ -362,6 +373,10 @@ String configJson() {
   doc["nightbrightness"] = cfg.nightBrightness; doc["ntp"] = cfg.ntp;
   doc["timezone"] = cfg.timezoneMin; doc["tz"] = cfg.tz; doc["themeInterval"] = cfg.themeInterval;
   doc["faces"] = cfg.faceMask; doc["nightauto"] = cfg.nightAuto;
+  doc["photointerval"] = cfg.photoInterval;
+  doc["facesapi"] = cfg.facesApi; doc["hacompat"] = cfg.haCompat; doc["mqtt"] = cfg.mqttOn;
+  doc["mqtthost"] = cfg.mqttHost; doc["mqttport"] = cfg.mqttPort; doc["mqttuser"] = cfg.mqttUser;
+  doc["mqttbase"] = cfg.mqttBase;   // the MQTT password and API key are never sent back
   doc["type"] = "smartclock-oss-settings"; doc["version"] = FW_VERSION;
   doc["color1"] = cfg.color1; doc["color2"] = cfg.color2; doc["color3"] = cfg.color3;
   // NOTE: stock leaked ssid/password/weatherkey here in cleartext. We deliberately
@@ -397,6 +412,16 @@ String applySetting(const String& key, const String& val) {
   else if (key == "faces")      cfg.faceMask = constrain(val.toInt(), 0, (1 << FACE_COUNT) - 1);
   else if (key == "mile")       cfg.mile = (val == "1" || val == "true");
   else if (key == "nightauto")  cfg.nightAuto = (val == "1" || val == "true");
+  else if (key == "lcd_brightness") cfg.brightness = constrain(val.toInt(), 0, 100);   // stock key
+  else if (key == "photointerval") cfg.photoInterval = constrain(val.toInt(), 1, 3600);
+  else if (key == "facesapi")   { cfg.facesApi = (val == "1" || val == "true"); integrationsSettingsChanged(); }
+  else if (key == "hacompat")   cfg.haCompat = (val == "1" || val == "true");
+  else if (key == "mqtt")       { cfg.mqttOn = (val == "1" || val == "true"); integrationsSettingsChanged(); }
+  else if (key == "mqtthost")   { cfg.mqttHost = val; integrationsSettingsChanged(); }
+  else if (key == "mqttport")   { cfg.mqttPort = constrain(val.toInt(), 1, 65535); integrationsSettingsChanged(); }
+  else if (key == "mqttuser")   { cfg.mqttUser = val; integrationsSettingsChanged(); }
+  else if (key == "mqttpass")   { cfg.mqttPass = val; integrationsSettingsChanged(); }
+  else if (key == "mqttbase")   { cfg.mqttBase = val; integrationsSettingsChanged(); }
   else return F("Unknown Key");
   return "";
 }
@@ -416,7 +441,10 @@ bool settingsWritable() {
 }
 
 void handleApiSet() {
-  if (!requireAuth() || !settingsWritable()) return;
+  String key = server.arg("key");
+  bool compat = cfg.haCompat && (key == "theme" || key == "lcd_brightness" || key == "brightness");
+  if (!compat && !requireAuth()) return;   // geekmagic-hacs cannot sign in (Integrations)
+  if (!settingsWritable()) return;
   String err = applySetting(server.arg("key"), server.arg("value"));
   if (err == "Unknown Key") { server.send(200, "text/plain", err); return; }   // stock reply
   if (err.length()) { server.send(400, "text/plain", err); return; }
@@ -524,6 +552,12 @@ String photoName(const String& raw) {   // a safe /photo file name, or "" if not
   return n;
 }
 
+// Photo changes need a sign-in, except through the stock-compatible /photo/* API
+// while "Home Assistant dashboards" is on (geekmagic-hacs cannot sign in).
+bool photoAccess() {
+  return requestAuthorized() || (cfg.haCompat && server.uri().startsWith("/photo/"));
+}
+
 void dropPhotoUpload(const char* why) {
   if (photoFile) { photoFile.close(); LittleFS.remove(photoPath); }
   if (photoError.isEmpty()) photoError = why;
@@ -533,7 +567,7 @@ void handlePhotoUpload() {
   HTTPUpload& up = server.upload();
   if (up.status == UPLOAD_FILE_START) {
     photoError = "";
-    if (!requestAuthorized()) { photoError = "Sign in first"; return; }
+    if (!photoAccess()) { photoError = "Sign in first"; return; }
     if (!storageReady || recoveryMode) { photoError = "Storage unavailable"; return; }
     String name = photoName(up.filename);
     if (name.isEmpty()) { photoError = "Only .jpg photos can be uploaded"; return; }
@@ -569,8 +603,9 @@ void handlePhotoList() {
     while (dir.next()) {
       if (!dir.isFile()) continue;
       JsonObject f = files.add<JsonObject>();
-      f["name"] = dir.fileName(); f["size"] = dir.fileSize();
+      f["name"] = dir.fileName(); f["size"] = dir.fileSize(); f["enabled"] = photoEnabled(dir.fileName());
     }
+    doc["interval"] = cfg.photoInterval;
     FSInfo fs; LittleFS.info(fs);
     doc["total"] = fs.totalBytes; doc["used"] = fs.usedBytes;
   }
@@ -599,7 +634,7 @@ bool servePhoto() {
 }
 
 void handlePhotoDelete() {
-  if (!requireAuth()) return;
+  if (!photoAccess()) { server.send(401, "text/plain", "Sign in first"); return; }
   if (!storageReady || recoveryMode) { server.send(503, "text/plain", "Storage unavailable"); return; }
   String name = server.arg("name");
   bool listed = false;
@@ -721,7 +756,8 @@ void setupRoutes() {
   server.on("/api/settings/import", HTTP_POST, handleSettingsImport);
   server.on("/api/settings/reset", HTTP_POST, handleSettingsReset);
   server.on("/api/wifi/forget", HTTP_POST, handleWifiForget);
-  server.collectHeaders("Cookie");   // sessions are read from the cookie
+  server.collectHeaders("Cookie", "X-Api-Key");   // sessions; the faces API key
+  integrationsRoutes();
   server.onNotFound([]{
     if (servePhoto()) return;
     if (mode == MODE_AP) { // captive portal: send everything to setup
@@ -862,6 +898,9 @@ void handleStatus() {
   doc["photos"] = storageReady ? photoCount() : 0;
   doc["face"] = cfg.theme;
   doc["signedIn"] = requestAuthorized();
+  extern String mqttStatus();
+  doc["mqtt"] = mqttStatus();
+  if (cfg.theme == FACE_CUSTOM) doc["customFace"] = cfg.customFace;
   doc["nightAuto"] = cfg.nightAuto;
   if (wx.sunrise >= 0 && wx.sunset >= 0) {
     char sun[12];
@@ -983,15 +1022,16 @@ void loop() {
   if (buttonPressed) {                 // button (if fitted) cycles faces
     buttonPressed = false;
     // Debounced and not persisted: a noisy or unfitted GPIO4 must not wear flash.
-    if (millis() - lastButton > 300) { lastButton = millis(); cfg.theme = nextFace(cfg.theme, false); faceSince = millis(); }
+    if (millis() - lastButton > 300) { lastButton = millis(); advanceFace(false); faceSince = millis(); }
   }
   if (cfg.themeInterval > 0 && millis() - faceSince > (uint32_t)cfg.themeInterval * 1000) {
     faceSince = millis();
-    cfg.theme = nextFace(cfg.theme, true);   // in RAM only; the saved face stays the user's choice
+    advanceFace(true);   // in RAM only; the saved face stays the user's choice
   }
 
   if (mode == MODE_RUN) {
     serviceWeather();
+    integrationsLoop();
     time_t now = time(nullptr);
     bool timeValid = now > 1600000000;
     struct tm t; localtime_r(&now, &t);
@@ -1000,7 +1040,7 @@ void loop() {
     if (timeValid && (t.tm_min != lastBrightMin || brightnessDirty)) {
       brightnessDirty = false;
       lastBrightMin = t.tm_min;
-      setBacklight(isNight(t) ? cfg.nightBrightness : cfg.brightness);
+      setBacklight(backlightOff ? 0 : isNight(t) ? cfg.nightBrightness : cfg.brightness);
     }
     if (revealUntil && (int32_t)(millis() - revealUntil) >= 0) { revealUntil = 0; faceInvalidate(); }
     if (!revealUntil && (int32_t)(millis() - faceHoldUntil) >= 0) faceDraw(cfg.theme, t, timeValid);

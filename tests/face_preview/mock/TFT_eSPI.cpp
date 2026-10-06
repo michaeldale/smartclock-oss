@@ -96,11 +96,16 @@ void TFT_eSPI::drawWedgeLine(float ax, float ay, float bx, float by, float ar, f
     }
 }
 
-void TFT_eSPI::drawSmoothArc(int32_t x0, int32_t y0, int32_t r, int32_t ir, uint32_t, uint32_t, uint32_t c, uint32_t bg, bool) {
+// TFT_eSPI arcs: 0 degrees at 6 o'clock, increasing clockwise, from a0 to a1.
+void TFT_eSPI::drawSmoothArc(int32_t x0, int32_t y0, int32_t r, int32_t ir, uint32_t a0, uint32_t a1, uint32_t c, uint32_t bg, bool) {
   float mid = (r + ir) / 2.0f, half = (r - ir) / 2.0f;
   for (int32_t y = -r - 1; y <= r + 1; ++y)
-    for (int32_t x = -r - 1; x <= r + 1; ++x)
+    for (int32_t x = -r - 1; x <= r + 1; ++x) {
+      float a = std::atan2(float(-x), float(y)) * 57.29578f;
+      if (a < 0) a += 360;
+      if (a < a0 || a > a1) continue;
       blend(x0 + x, y0 + y, clamp01(half + 0.5f - std::fabs(std::sqrt(float(x * x + y * y)) - mid)), c, bg);
+    }
 }
 
 void TFT_eSPI::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t* data) {

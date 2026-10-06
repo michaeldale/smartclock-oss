@@ -4,6 +4,35 @@ All notable SmartClock-OSS changes are recorded here. Versions follow semantic
 versioning. `/version` on the device reports the version it was built as; a
 `-dev` suffix marks a build from an unreleased checkout.
 
+## 1.2.0 - 2026-10-06
+
+The version moves from 0.1.x to 1.2.0 with this release.
+
+### Added
+
+- **Integrations, all off by default** (settings page → Integrations; see
+  [integrations-api.md](docs/specifications/integrations-api.md) and the
+  [record](docs/decisions/2026-10-06-integrations.md)):
+  - **Custom faces**: design faces as JSON (text, shapes, progress rings and
+    bars, weather icons, photos) and send them over HTTP or MQTT. Placeholders
+    such as `{time}` and `{temp}` stay live on the clock, and your own
+    variables can be pushed separately. Signed-in page or API key.
+  - **Home Assistant dashboards**: the stock SD Pro photo API, so the
+    geekmagic-hacs integration can push rendered dashboards. These endpoints
+    work without the password while on, and only reach photos, face and
+    brightness.
+  - **MQTT** with Home Assistant discovery: backlight light, face select,
+    weather sensors, update button; custom faces and variables on topics.
+- Photos: per-photo slideshow switch (the eye on each photo) and seconds per photo.
+  A single photo is no longer re-decoded at every interval, and full-screen
+  photos draw without a black flash (geekmagic-hacs uses a 1 s interval).
+- The System card links to the project on GitHub
+  (https://github.com/michaeldale/smartclock-oss).
+
+### Changed
+
+- ArduinoJson built without 64-bit integers and doubles (4.4 KB smaller).
+
 ## 0.1.2 - 2026-10-06
 
 ### Upgrading from 0.1.1

@@ -9,6 +9,8 @@
 #include <tjpgd.h>   // the decoder core only: the TJpg_Decoder wrapper links SPIFFS (~32 KB)
 #include "config.h"
 #include "weather.h"
+#include "integrations.h"
+#include <ArduinoJson.h>
 
 TFT_eSPI& clockDisplay();   // main.cpp
 static TFT_eSPI& D() { return clockDisplay(); }
@@ -456,9 +458,10 @@ int jpgOut(JDEC* jd, void* bmp, JRECT* r) {
   return 1;
 }
 
-// Decodes a baseline JPEG straight to the panel, scaled by 1/2..1/8 to fit 240x240.
+// Decodes a baseline JPEG straight to the panel, scaled by 1/2..1/8 to fit 240x240,
+// centred and on a cleared screen unless a position is given (custom faces).
 // The 3.6 KB workspace is only allocated while decoding.
-bool drawJpeg(const String& path) {
+bool drawJpeg(const String& path, int x = -1, int y = -1) {
   constexpr size_t POOL = 3600;
   File f = LittleFS.open(path, "r");
   if (!f) return false;
@@ -470,9 +473,12 @@ bool drawJpeg(const String& path) {
   if (pool && jd_prepare(&jd, jpgIn, pool, POOL, &io) == JDR_OK) {
     uint8_t scale = 0;
     while (((jd.width >> scale) > 240 || (jd.height >> scale) > 240) && scale < 3) ++scale;
-    io.ox = (240 - (jd.width >> scale)) / 2;
-    io.oy = (240 - (jd.height >> scale)) / 2;
-    D().fillScreen(BG);
+    bool centred = x < 0 || y < 0;
+    io.ox = centred ? (240 - (jd.width >> scale)) / 2 : x;
+    io.oy = centred ? (240 - (jd.height >> scale)) / 2 : y;
+    // Clear only around a photo smaller than the screen; a full-screen photo
+    // overwrites every pixel, and clearing first would flash black.
+    if (centred && ((jd.width >> scale) < 240 || (jd.height >> scale) < 240)) D().fillScreen(BG);
     D().setSwapBytes(true);   // tjpgd emits native-endian RGB565
     ok = jd_decomp(&jd, jpgOut, scale) == JDR_OK;
     D().setSwapBytes(false);
@@ -492,7 +498,7 @@ String photoAt(int index) {   // index modulo the number of photos
   int n = 0;
   String first;
   while (dir.next()) {
-    if (!dir.isFile() || !isPhoto(dir.fileName())) continue;
+    if (!dir.isFile() || !isPhoto(dir.fileName()) || !photoEnabled(dir.fileName())) continue;
     if (n == 0) first = dir.fileName();
     if (n++ == index) return "/photo/" + dir.fileName();
   }
@@ -503,9 +509,8 @@ void photo(const struct tm& t, bool force) {
   static int min = -1, index = -1;
   static uint32_t shown = 0;
   static bool have = false;
-  if (force || millis() - shown > 60000) {
+  if (force || millis() - shown > (uint32_t)std::max(1, cfg.photoInterval) * 1000) {
     shown = millis();
-    min = -1;
     int count = photoCount();
     have = count > 0;
     if (!have) {
@@ -517,10 +522,16 @@ void photo(const struct tm& t, bool force) {
       placeholder(92, "No photos yet", "Upload photos in the", "clock's settings");
       return;
     }
-    index = (index + 1) % count;
-    if (!drawJpeg(photoAt(index))) {
-      D().fillScreen(BG);
-      placeholder(92, "Photo unreadable", "Use a baseline JPEG", nullptr);
+    int next = (index + 1) % count;
+    // The same single photo again (geekmagic-hacs sets a 1 s interval): nothing to
+    // redraw. A new upload still shows at once, because it forces a redraw.
+    if (force || next != index) {
+      index = next;
+      min = -1;   // the photo covers the time pill; draw it again
+      if (!drawJpeg(photoAt(index))) {
+        D().fillScreen(BG);
+        placeholder(92, "Photo unreadable", "Use a baseline JPEG", nullptr);
+      }
     }
   }
   if (have && t.tm_min != min) {
@@ -528,6 +539,205 @@ void photo(const struct tm& t, bool force) {
     D().fillSmoothRoundRect(66, 196, 108, 34, 17, BG, BG);
     text(tb, 120, 214, 4, WHITE, BG, MC_DATUM);
     min = t.tm_min;
+  }
+}
+
+// ---- Custom faces (integrations): a JSON list of items --------------------------
+// Items draw in order. Text with a "bg" colour, rings, bars and icons with "bg" are
+// opaque: when only their content changes they are redrawn alone. Anything else
+// that changes (a transparent text, an image) redraws the whole face.
+JsonDocument customDoc;
+String customName;
+uint32_t customVer = 0, customEvalAt = 0;
+bool customLoaded = false;
+constexpr size_t CUSTOM_ITEMS = 32;
+uint32_t customHash[CUSTOM_ITEMS];
+
+// Field access through a few out-of-line helpers: inlined ArduinoJson lookups at
+// every use cost several KB of flash.
+__attribute__((noinline)) int ji(JsonObjectConst o, const char* k, int d) {
+  JsonVariantConst v = o[k];
+  return v.is<int>() ? v.as<int>() : d;
+}
+__attribute__((noinline)) const char* js(JsonObjectConst o, const char* k, const char* d) {
+  const char* v = o[k];
+  return v ? v : d;
+}
+__attribute__((noinline)) bool jhas(JsonObjectConst o, const char* k) { return !o[k].isNull(); }
+__attribute__((noinline)) bool jb(JsonObjectConst o, const char* k, bool d) {
+  JsonVariantConst v = o[k];
+  return v.is<bool>() ? v.as<bool>() : d;
+}
+
+uint16_t color565(JsonVariantConst v, uint16_t fallback) {
+  if (v.is<int>()) return (uint16_t)v.as<int>();   // already RGB565
+  const char* s = v | "";
+  if (*s != '#') return fallback;
+  uint32_t n = strtoul(s + 1, nullptr, 16);
+  size_t len = strlen(s + 1);
+  if (len == 3) n = ((n & 0xf00) * 0x1100) | ((n & 0xf0) * 0x110) | ((n & 0xf) * 0x11);
+  else if (len != 6) return fallback;
+  return ((n >> 8) & 0xF800) | ((n >> 5) & 0x07E0) | ((n >> 3) & 0x001F);
+}
+
+// {name} -> its current value: clock and weather fields, else a pushed variable.
+String fieldValue(const String& key, const struct tm& t) {
+  char b[24];
+  auto num = [&](int v) { snprintf(b, sizeof(b), "%d", v); return String(b); };
+  auto two = [&](int v) { snprintf(b, sizeof(b), "%02d", v); return String(b); };
+  if (key == "time") { smallTime(b, sizeof(b), t); return b; }
+  if (key == "hh") { snprintf(b, sizeof(b), cfg.hour12 ? "%d" : "%02d", clockHour(t)); return b; }
+  if (key == "mm") return two(t.tm_min);
+  if (key == "ss") return two(t.tm_sec);
+  if (key == "ampm") return ampm(t);
+  if (key == "day") return num(t.tm_mday);
+  if (key == "dow") return DAY_LONG[t.tm_wday];
+  if (key == "dow3") return DAY_SHORT[t.tm_wday];
+  if (key == "month") return MONTH_LONG[t.tm_mon];
+  if (key == "mon3") return MONTH_SHORT[t.tm_mon];
+  if (key == "year") return num(t.tm_year + 1900);
+  if (key == "date") { snprintf(b, sizeof(b), "%d %s", t.tm_mday, MONTH_LONG[t.tm_mon]); return b; }
+  if (key == "unit") return cfg.celsius ? "C" : "F";
+  if (key == "wunit") return cfg.mile ? "mph" : "km/h";
+  bool w = wx.valid;
+  if (key == "temp") return w ? num(displayTemp(wx.temp)) : "--";
+  if (key == "feels") return w ? num(displayTemp(wx.feels)) : "--";
+  if (key == "hi") return w ? num(displayTemp(wx.tempMax)) : "--";
+  if (key == "lo") return w ? num(displayTemp(wx.tempMin)) : "--";
+  if (key == "hum") return w ? num(wx.humidity) : "--";
+  if (key == "wind") return w ? num((int)lroundf(cfg.mile ? wx.wind * 2.237f : wx.wind * 3.6f)) : "--";
+  if (key == "desc") return wx.desc;
+  if (key == "main") return wx.main;
+  if (key == "city") return wx.cityName;
+  if (key == "icon") return wx.icon;
+  if (key == "sunrise" || key == "sunset") {
+    int m = key == "sunrise" ? wx.sunrise : wx.sunset;
+    if (m < 0) return "--";
+    snprintf(b, sizeof(b), "%02d:%02d", (m / 60) % 24, m % 60);
+    return b;
+  }
+  return faceVar(key);
+}
+
+String resolve(const char* tpl, const struct tm& t) {
+  String out;
+  for (const char* p = tpl; *p; ++p) {
+    const char* end = *p == '{' ? strchr(p, '}') : nullptr;
+    if (!end || end - p > 16) { out += *p; continue; }
+    out += fieldValue(String(p + 1).substring(0, end - p - 1), t);
+    p = end;
+  }
+  return out;
+}
+
+int intOf(JsonVariantConst v, const struct tm& t, int fallback) {
+  if (v.is<int>()) return v.as<int>();
+  if (v.is<const char*>()) return atoi(resolve(v.as<const char*>(), t).c_str());
+  return fallback;
+}
+
+uint8_t datumOf(const char* a) {
+  static const char* const names[] = {"tl", "tc", "tr", "ml", "mc", "mr", "bl", "bc", "br"};
+  for (uint8_t i = 0; i < 9; ++i) if (!strcmp(a, names[i])) return i;   // TL_DATUM.. BR_DATUM
+  return TL_DATUM;
+}
+
+bool itemOpaque(JsonObjectConst it) {
+  const char* type = js(it, "type", "");
+  if (!strcmp(type, "ring") || !strcmp(type, "bar")) return true;
+  return jhas(it, "bg") && (!strcmp(type, "text") || !strcmp(type, "icon"));
+}
+
+uint32_t itemHash(JsonObjectConst it, const struct tm& t) {   // FNV-1a of its live content
+  String v = resolve(js(it, "text", ""), t);
+  v += '|'; v += intOf(it["value"], t, 0);
+  v += '|'; v += resolve(js(it, "icon", ""), t);
+  v += '|'; v += js(it, "src", "");
+  uint32_t h = 2166136261u;
+  for (unsigned i = 0; i < v.length(); ++i) h = (h ^ (uint8_t)v[i]) * 16777619u;
+  return h;
+}
+
+void ring(int x, int y, int r, int w, int value, int max, uint16_t c, uint16_t track, uint16_t bg) {
+  int ir = std::max(0, r - w);
+  D().drawSmoothArc(x, y, r, ir, 0, 360, track, bg);
+  if (max <= 0 || value <= 0) return;
+  int deg = std::min(360, value * 360 / max);
+  // TFT_eSPI arcs start at 6 o'clock; progress starts at 12, so 180 + deg, split at 360.
+  if (deg >= 360) { D().drawSmoothArc(x, y, r, ir, 0, 360, c, bg); return; }
+  int end = 180 + deg;
+  if (end <= 360) D().drawSmoothArc(x, y, r, ir, 180, end, c, bg);
+  else { D().drawSmoothArc(x, y, r, ir, 180, 360, c, bg); D().drawSmoothArc(x, y, r, ir, 0, end - 360, c, bg); }
+}
+
+void drawItem(JsonObjectConst it, const struct tm& t, uint16_t faceBg) {
+  const char* type = js(it, "type", "");
+  int x = ji(it, "x", 0), y = ji(it, "y", 0);
+  uint16_t c = color565(it["color"], WHITE), bg = color565(it["bg"], faceBg);
+  if (!strcmp(type, "text")) {
+    String s = resolve(js(it, "text", ""), t);
+    int font = ji(it, "font", 4);
+    if (font != 2 && font != 4 && font != 6 && font != 8) font = 4;
+    uint8_t datum = datumOf(js(it, "align", "tl"));
+    if (!jhas(it, "bg")) textClear(s.c_str(), x, y, font, c, datum);
+    else text(s.c_str(), x, y, font, c, bg, datum, ji(it, "pad", 0));
+  } else if (!strcmp(type, "rect")) {
+    int w = ji(it, "w", 0), h = ji(it, "h", 0), r = ji(it, "r", 0);
+    if (jb(it, "fill", true)) { if (r) D().fillSmoothRoundRect(x, y, w, h, r, c, faceBg); else D().fillRect(x, y, w, h, c); }
+    else if (r) D().drawRoundRect(x, y, w, h, r, c); else D().drawRect(x, y, w, h, c);
+  } else if (!strcmp(type, "circle")) {
+    int r = ji(it, "r", 10);
+    if (jb(it, "fill", true)) D().fillSmoothCircle(x, y, r, c, faceBg); else D().drawSmoothCircle(x, y, r, c, faceBg);
+  } else if (!strcmp(type, "line")) {
+    float w = (ji(it, "w", 2)) / 2.0f;
+    D().drawWedgeLine(x, y, ji(it, "x2", x), ji(it, "y2", y), w, w, c, faceBg);
+  } else if (!strcmp(type, "ring")) {
+    ring(x, y, ji(it, "r", 50), ji(it, "w", 8), intOf(it["value"], t, 0), intOf(it["max"], t, 100),
+         c, color565(it["track"], PANEL_HI), faceBg);
+  } else if (!strcmp(type, "bar")) {
+    int w = ji(it, "w", 100), h = ji(it, "h", 8), r = std::min(h / 2, (int)(ji(it, "r", h / 2)));
+    int value = intOf(it["value"], t, 0), max = std::max(1, intOf(it["max"], t, 100));
+    D().fillSmoothRoundRect(x, y, w, h, r, color565(it["track"], PANEL_HI), faceBg);
+    int fw = std::min(w, std::max(0, value) * w / max);
+    if (fw > 0) D().fillSmoothRoundRect(x, y, std::max(fw, 2 * r), h, r, c, color565(it["track"], PANEL_HI));
+  } else if (!strcmp(type, "icon")) {
+    int size = ji(it, "size", 48);
+    if (jhas(it, "bg")) D().fillRect(x - size / 2 - 2, y - size / 2 - 2, size + 4, size + 4, bg);
+    weatherIcon(x, y, size, resolve(js(it, "icon", "{icon}"), t), bg);
+  } else if (!strcmp(type, "image")) {
+    drawJpeg(String("/photo/") + (js(it, "src", "")), x, y);
+  }
+}
+
+void custom(const struct tm& t, bool force) {
+  if (customName != cfg.customFace || customVer != customFacesVersion()) {
+    customName = cfg.customFace;
+    customVer = customFacesVersion();
+    customDoc.clear();
+    File f = LittleFS.open("/faces/" + customName + ".json", "r");
+    customLoaded = f && !deserializeJson(customDoc, f) && customDoc["items"].is<JsonArray>();
+    if (f) f.close();
+    force = true;
+  }
+  if (!customLoaded) {
+    if (force) { D().fillScreen(BG); placeholder(92, "Face not found", customName.c_str(), nullptr); }
+    return;
+  }
+  if (!force && millis() - customEvalAt < 250) return;   // placeholders change at most each second
+  customEvalAt = millis();
+  uint16_t bg = color565(customDoc["bg"], BG);
+  JsonArrayConst items = customDoc["items"];
+  size_t n = std::min(items.size(), CUSTOM_ITEMS);
+  uint32_t h[CUSTOM_ITEMS];
+  bool full = force;
+  for (size_t i = 0; i < n; ++i) {
+    h[i] = itemHash(items[i], t);
+    if (h[i] != customHash[i] && !itemOpaque(items[i])) full = true;
+  }
+  if (full) D().fillScreen(bg);
+  for (size_t i = 0; i < n; ++i) {
+    if (full || h[i] != customHash[i]) drawItem(items[i], t, bg);
+    customHash[i] = h[i];
   }
 }
 
@@ -541,7 +751,7 @@ int photoCount() {
   if (photosCached < 0) {
     photosCached = 0;
     Dir dir = LittleFS.openDir("/photo");
-    while (dir.next()) if (dir.isFile() && isPhoto(dir.fileName())) photosCached++;
+    while (dir.next()) if (dir.isFile() && isPhoto(dir.fileName()) && photoEnabled(dir.fileName())) photosCached++;
   }
   return photosCached;
 }
@@ -551,6 +761,7 @@ bool faceAvailable(int face) {
     case FACE_WEATHER:  return wx.valid;
     case FACE_FORECAST: return fc.valid;
     case FACE_PHOTO:    return photoCount() > 0;
+    case FACE_CUSTOM:   return cfg.facesApi && customFaceExists(cfg.customFace);
     default:            return face >= 0 && face < FACE_COUNT;
   }
 }
@@ -562,7 +773,8 @@ void faceDraw(int face, const struct tm& t, bool timeValid) {
     return;
   }
   bool force = dirty || face != drawnFace;
-  if (force && face != FACE_PHOTO) D().fillScreen(BG);
+  if (face == FACE_CUSTOM && !cfg.facesApi) face = FACE_CLASSIC;   // integration turned off
+  if (force && face != FACE_PHOTO && face != FACE_CUSTOM) D().fillScreen(BG);
   switch (face) {
     case FACE_WEATHER:  weather(t, force);  break;
     case FACE_PHOTO:    photo(t, force);    break;
@@ -570,6 +782,7 @@ void faceDraw(int face, const struct tm& t, bool timeValid) {
     case FACE_SIMPLE:   simple(t, force);   break;
     case FACE_FORECAST: forecast(t, force); break;
     case FACE_FLIP:     flip(t, force);     break;
+    case FACE_CUSTOM:   custom(t, force);   break;
     default:            classic(t, force);  break;
   }
   drawnFace = face; dirty = false;
